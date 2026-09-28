@@ -160,4 +160,19 @@ class QuickAddParserTest {
         assertNull(r.due)
         assertEquals("Buy rat trap and kale", r.title)
     }
+
+    @Test fun tanglishDailyReminder() {
+        // Tuesday 12:33, like the screenshot: today's 9 AM has passed, so it starts tomorrow.
+        val r = QuickAddParser.parse("Daily sunscreen use pannanum mor remind pannu", LocalDateTime.of(2026, 9, 29, 12, 33))
+        assertEquals("Sunscreen use pannanum", r.title)
+        assertEquals(RepeatUnit.DAY, r.recurrence?.unit)
+        assertEquals(ReminderKind.NOTIFY, r.reminder)
+        assertEquals(LocalDateTime.of(2026, 9, 30, 9, 0), r.due)
+    }
+
+    @Test fun hindiReminder() {
+        val r = p("kal shaam 6 baje dawai yaad dilana")
+        assertEquals(ReminderKind.NOTIFY, r.reminder)
+        assertEquals(LocalDateTime.of(2026, 9, 29, 18, 0), r.due)
+    }
 }

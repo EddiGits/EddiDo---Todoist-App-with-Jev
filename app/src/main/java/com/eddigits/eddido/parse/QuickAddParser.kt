@@ -43,7 +43,7 @@ object QuickAddParser {
     private const val NUM = "\\d+|an?|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty five|half an?"
     /** English with common typos, plus Tamil (naalai, nalaiki) and Hindi (kal). */
     private const val TOMORROW = "to?m+[ao]r+[ao]w*|tmrw|tmr|tmw|2mrw|naa?l(?:ai|a|e)k*[iu]?|kal"
-    private const val MORNING = "morn\\w*|mrng|kaa?l(?:ai|a)y?i?(?:la|le|l)?|subh?ah?"
+    private const val MORNING = "morn\\w*|mor|mrng|kaa?l(?:ai|a)y?i?(?:la|le|l)?|subh?ah?"
     private const val AFTERNOON = "aftern\\w*|ma(?:dh|th)iy?a?m\\w*|dopa?h[ae]r"
     private const val EVENING = "even(?:ing|in|ng)|evng|eveing|evning|saa?yan\\w*|shaa?m"
     private const val NIGHT = "night|nite|raa?th?i?ri\\w*|raath?"
@@ -114,7 +114,7 @@ object QuickAddParser {
             }
         }
         if (explicitReminder == null &&
-            c.find("\\b(?:please\\s+)?(?:remind\\s+me(?:\\s+(?:to|about|of))?|reminder(?:\\s+(?:to|for))?:?|don'?t\\s+forget(?:\\s+to)?|remember\\s+to)\\b", SpanKind.REMINDER) != null
+            c.find("\\b(?:please\\s+)?(?:remind(?:\\s+me)?(?:\\s+(?:to|about|of))?(?:\\s+(?:pannu(?:nga)?|panna|karo|kar\\s*do|kardo|karna))?|reminder(?:\\s+(?:to|for|venum|vai|set\\s+pannu|lagao))?:?|don'?t\\s+forget(?:\\s+to)?|remember\\s+to|nyaa?bagam\\s+paduth\\w*|ninaivu\\s+paduth\\w*|yaad\\s+dil\\w*)\\b", SpanKind.REMINDER) != null
         ) explicitReminder = ReminderKind.NOTIFY
         if (c.find("\\b(?:no\\s+reminder|silently)\\b", SpanKind.REMINDER) != null) explicitReminder = ReminderKind.NONE
 
