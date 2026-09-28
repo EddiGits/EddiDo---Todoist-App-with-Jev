@@ -17,15 +17,15 @@ The design follows [Shapeshift](https://github.com/anishfn/shapeshift): **the AI
 - `ai/` then sorts the task into a project and adds labels in the background. Anything you typed or picked yourself wins over the AI.
 - `alarm/` rings exact alarms (`setAlarmClock`, shown full screen over the lock screen) or posts notifications, with Done and Snooze buttons. It re-arms repeating tasks and restores alarms after a reboot.
 
-## Switching AI provider (OpenRouter → TypeSafe)
+## AI providers
 
-Every provider implements one interface:
+| Provider | Job | Speed |
+|---|---|---|
+| **TypeSafe Jev** (`ai/TypeSafeTaskAi.kt`) | Picks project, labels, priority and alarm-vs-notification in one call | ~0.4 s |
+| **OpenRouter** (`ai/OpenRouterTaskAi.kt`) | Reads dates the offline parser can't (Tamil/Hindi, "before Diwali"). It does everything when no TypeSafe key is set | ~2.5 s |
+| **Offline** (`ai/OfflineTaskAi.kt`) | Keyword rules, used when both calls fail | instant |
 
-```kotlin
-interface TaskAi { suspend fun analyze(text: String, projects: List<String>, now: LocalDateTime): AiResult? }
-```
-
-To switch, write `TypeSafeTaskAi : TaskAi` (call `POST https://api.typesafe.ai/v1/systemone`) and change the one line in `AiProvider` (`ai/TaskAi.kt`). Nothing else changes. If the provider fails, the app falls back to `OfflineTaskAi` (keyword rules).
+`AiProvider` in `ai/TaskAi.kt` is the only place that picks between them, based on which keys are set in `secrets.properties`. The two calls run side by side, and each answer is applied as soon as it arrives. Jev only *chooses*; dates and times come from the parser in code, as in Shapeshift.
 
 ## Build
 

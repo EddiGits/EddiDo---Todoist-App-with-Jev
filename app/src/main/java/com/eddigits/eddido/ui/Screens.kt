@@ -300,7 +300,7 @@ private fun BrowseScreen(tasks: List<Task>, projects: List<String>, onOpen: (Scr
                 Icon(Icons.Filled.AutoAwesome, null, tint = Brand, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    if (BuildConfig.OPENROUTER_API_KEY.isNotBlank()) "AI: OpenRouter · ${BuildConfig.OPENROUTER_MODEL}" else "AI: offline keyword sorting (no key)",
+                    "AI: ${com.eddigits.eddido.ai.AiProvider.label}",
                     fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

@@ -1,5 +1,6 @@
 package com.eddigits.eddido.ai
 
+import com.eddigits.eddido.BuildConfig
 import com.eddigits.eddido.model.Recurrence
 import com.eddigits.eddido.model.ReminderKind
 import java.time.LocalDateTime
@@ -25,19 +26,37 @@ data class AiResult(
 )
 
 /**
- * The single seam for AI. To move from OpenRouter to TypeSafe, write a
- * `TypeSafeTaskAi : TaskAi` and change the one line in [AiProvider].
+ * The single seam for AI. Each provider (TypeSafe, OpenRouter, offline) implements
+ * this; [AiProvider] picks which one runs.
  */
 interface TaskAi {
     /** Returns null when the AI is unavailable; callers then keep the offline result. */
     suspend fun analyze(text: String, projects: List<String>, now: LocalDateTime): AiResult?
 }
 
+/**
+ * The one place providers are chosen. With a TypeSafe key, Jev does the choosing and
+ * OpenRouter only reads dates the offline parser missed; without one, OpenRouter does both.
+ * Any failure falls back to the offline keyword rules.
+ */
 object AiProvider {
-    val default: TaskAi by lazy {
-        // ← Swap providers here. e.g. TypeSafeTaskAi(BuildConfig.TYPESAFE_API_KEY)
-        FallbackTaskAi(OpenRouterTaskAi(), OfflineTaskAi())
+    private val hasJev get() = BuildConfig.TYPESAFE_API_KEY.isNotBlank()
+
+    /** Picks project, labels, priority and reminder kind. */
+    val choices: TaskAi by lazy {
+        if (hasJev) FallbackTaskAi(TypeSafeTaskAi(), FallbackTaskAi(OpenRouterTaskAi(), OfflineTaskAi()))
+        else FallbackTaskAi(OpenRouterTaskAi(), OfflineTaskAi())
     }
+
+    /** Reads dates the offline parser could not; null when [choices] already does it. */
+    val dates: TaskAi? by lazy { if (hasJev) OpenRouterTaskAi() else null }
+
+    val label: String
+        get() = when {
+            hasJev -> "TypeSafe ${BuildConfig.JEV_MODEL}" + if (BuildConfig.OPENROUTER_API_KEY.isNotBlank()) " · dates via OpenRouter" else ""
+            BuildConfig.OPENROUTER_API_KEY.isNotBlank() -> "OpenRouter · ${BuildConfig.OPENROUTER_MODEL}"
+            else -> "offline keyword sorting (no key)"
+        }
 }
 
 /** Tries [primary]; if it fails or is not configured, uses [fallback]. */

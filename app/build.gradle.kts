@@ -20,10 +20,12 @@ android {
         applicationId = "com.eddigits.eddido"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         buildConfigField("String", "OPENROUTER_API_KEY", "\"${secret("OPENROUTER_API_KEY")}\"")
+        buildConfigField("String", "TYPESAFE_API_KEY", "\"${secret("TYPESAFE_API_KEY")}\"")
+        buildConfigField("String", "JEV_MODEL", "\"${secret("JEV_MODEL", "jev-latest")}\"")
         buildConfigField("String", "OPENROUTER_MODEL", "\"${secret("OPENROUTER_MODEL", "typesafe/jev-router")}\"")
     }
 
