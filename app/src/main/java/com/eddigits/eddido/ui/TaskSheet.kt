@@ -71,6 +71,10 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import com.eddigits.eddido.ai.AiResult
 import com.eddigits.eddido.data.ManualChoices
 import com.eddigits.eddido.model.Recurrence
 import com.eddigits.eddido.model.ReminderKind
@@ -90,6 +94,8 @@ data class TaskFields(
     val recurrence: Recurrence? = null,
     val project: String = Task.INBOX,
     val labels: List<String> = emptyList(),
+    /** Which chips show an AI suggestion rather than something typed or picked. */
+    val aiDerived: Set<String> = emptySet(),
 )
 
 /** Quick add: type naturally, the chips light up as dates, repeats and priorities are recognised. */
@@ -99,32 +105,72 @@ fun QuickAddSheet(
     projects: List<String>,
     defaultProject: String?,
     defaultToday: Boolean,
+    previewChoices: suspend (String) -> AiResult?,
+    previewDates: suspend (String) -> AiResult?,
     onDismiss: () -> Unit,
-    onSubmit: (text: String, description: String, manual: ManualChoices) -> Unit,
+    onSubmit: (text: String, description: String, manual: ManualChoices, fallbackToday: Boolean) -> Unit,
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var text by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var manual by remember { mutableStateOf(ManualChoices(project = defaultProject)) }
     val parsed = remember(text) { QuickAddParser.parse(text) }
-    // Adding from the Today view dates the task today unless the text or the chip says otherwise.
-    val effective = if (defaultToday && !manual.dueSet && parsed.due == null)
-        manual.copy(dueSet = true, due = LocalDateTime.now().toLocalDate().atStartOfDay(), hasTime = false) else manual
-    val fields = TaskFields(
-        due = if (effective.dueSet) effective.due else parsed.due,
-        hasTime = if (effective.dueSet) effective.hasTime else parsed.hasTime,
-        priority = manual.priority ?: parsed.priority ?: 4,
-        reminder = manual.reminder ?: parsed.reminder,
-        recurrence = if (manual.recurrenceSet) manual.recurrence else parsed.recurrence,
-        project = manual.project ?: parsed.project ?: Task.INBOX,
-        labels = (parsed.labels + manual.labels).distinct(),
-    )
+
+    // Live AI: once typing pauses, ask Jev (and, if no date was found, the date reader).
+    // Answers are cached, so saving afterwards reuses them instead of calling again.
+    var aiChoices by remember { mutableStateOf<Pair<String, AiResult>?>(null) }
+    var aiDates by remember { mutableStateOf<Pair<String, AiResult>?>(null) }
+    var aiBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(text) {
+        val t = text.trim()
+        if (t.length < 4) { aiBusy = false; return@LaunchedEffect }
+        delay(500)
+        aiBusy = true
+        coroutineScope {
+            launch { previewChoices(t)?.let { aiChoices = t to it } }
+            launch { previewDates(t)?.let { aiDates = t to it } }
+        }
+        aiBusy = false
+    }
+    val current = text.trim()
+    val ai = aiChoices?.takeIf { it.first == current }?.second
+    val aiDate = (aiDates?.takeIf { it.first == current }?.second ?: ai)?.takeIf { it.due != null }
+
+    val aiDerived = mutableSetOf<String>()
+    val fields = run {
+        var due: LocalDateTime? = null
+        var hasTime = false
+        when {
+            manual.dueSet -> { due = manual.due; hasTime = manual.hasTime }
+            parsed.due != null -> { due = parsed.due; hasTime = parsed.hasTime }
+            aiDate != null -> { due = aiDate.due; hasTime = aiDate.hasTime; aiDerived += "date" }
+            // Adding from the Today view dates the task today unless something else gives a date.
+            defaultToday -> due = LocalDateTime.now().toLocalDate().atStartOfDay()
+        }
+        val priority = manual.priority ?: parsed.priority ?: ai?.priority?.also { aiDerived += "priority" } ?: 4
+        val project = manual.project ?: parsed.project ?: ai?.project?.also { aiDerived += "project" } ?: Task.INBOX
+        val reminder = manual.reminder ?: parsed.explicitReminder ?: when {
+            !hasTime -> ReminderKind.NONE
+            ai?.reminder == ReminderKind.ALARM -> ReminderKind.ALARM.also { aiDerived += "reminder" }
+            else -> ReminderKind.NOTIFY
+        }
+        TaskFields(
+            due = due,
+            hasTime = hasTime,
+            priority = priority,
+            reminder = reminder,
+            recurrence = if (manual.recurrenceSet) manual.recurrence else parsed.recurrence ?: aiDate?.recurrence,
+            project = project,
+            labels = (parsed.labels + manual.labels + (ai?.labels ?: emptyList())).distinct(),
+            aiDerived = aiDerived,
+        )
+    }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
     fun submit() {
         if (text.isBlank()) return
-        onSubmit(text.trim(), description.trim(), effective)
+        onSubmit(text.trim(), description.trim(), manual, defaultToday)
         text = ""; description = ""
         manual = ManualChoices(project = defaultProject)
     }
@@ -149,7 +195,7 @@ fun QuickAddSheet(
             PlainField(description, { description = it }, "Description", big = false)
             if (text.isBlank()) {
                 Text(
-                    "Try “pay rent on 5th p1”, “call mom tomorrow 7pm”, “10 min timer”, “gym every mon, wed, fri 6:30am”",
+                    "Try “pay rent on 5th p1”, “call mom tomorrow 7pm”, “10 min timer”, “naalai kalaila amma ku call”",
                     Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -158,11 +204,16 @@ fun QuickAddSheet(
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(
-                        "AI will sort it into a project and add labels after you save",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    val status = when {
+                        ai != null -> buildList {
+                            ai.project?.let { add(it) }
+                            if (ai.labels.isNotEmpty()) add(ai.labels.joinToString(", ") { "@$it" })
+                            aiDate?.due?.let { add(dueLabel(it, aiDate.hasTime)) }
+                        }.joinToString(" · ").ifEmpty { "No suggestions" } + if (aiBusy) " …" else ""
+                        aiBusy -> "Thinking…"
+                        else -> "AI suggests a project, labels and dates as you type"
+                    }
+                    Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
             }
             AttributeChips(
@@ -176,7 +227,7 @@ fun QuickAddSheet(
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                ProjectPicker(fields.project, projects) { manual = manual.copy(project = it) }
+                ProjectPicker(fields.project, projects, ai = "project" in fields.aiDerived) { manual = manual.copy(project = it) }
                 Spacer(Modifier.weight(1f))
                 FilledIconButton(
                     onClick = ::submit,
@@ -273,11 +324,13 @@ private fun AttributeChips(
             Icons.Outlined.CalendarToday,
             if (due != null) dueLabel(due, fields.hasTime) else "Date",
             if (due != null) dueColor(due, fields.hasTime) else null,
+            ai = "date" in fields.aiDerived,
         ) { dialog = "date" }
         Chip(
             if (fields.priority < 4) Icons.Filled.Flag else Icons.Outlined.Flag,
             if (fields.priority < 4) "P${fields.priority}" else "Priority",
             if (fields.priority < 4) priorityColor(fields.priority) else null,
+            ai = "priority" in fields.aiDerived,
         ) { dialog = "priority" }
         Chip(
             when (fields.reminder) {
@@ -291,6 +344,7 @@ private fun AttributeChips(
                 ReminderKind.NONE -> "Reminders"
             },
             if (fields.reminder != ReminderKind.NONE) MaterialTheme.colorScheme.primary else null,
+            ai = "reminder" in fields.aiDerived,
         ) { dialog = "reminder" }
         if (fields.recurrence != null) {
             Chip(Icons.Outlined.Repeat, fields.recurrence.label(), MaterialTheme.colorScheme.primary) { dialog = "repeat" }
@@ -347,7 +401,7 @@ private fun AttributeChips(
 }
 
 @Composable
-private fun ProjectPicker(project: String, projects: List<String>, onPick: (String) -> Unit) {
+private fun ProjectPicker(project: String, projects: List<String>, ai: Boolean = false, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     Box {
@@ -355,6 +409,7 @@ private fun ProjectPicker(project: String, projects: List<String>, onPick: (Stri
             Icon(if (project == Task.INBOX) Icons.Outlined.Inbox else Icons.Outlined.Tag, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(6.dp))
             Text(project, color = MaterialTheme.colorScheme.onSurface)
+            if (ai) Icon(Icons.Filled.AutoAwesome, "AI suggestion", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp).size(12.dp))
             Icon(Icons.Filled.ArrowDropDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         DropdownMenu(open, { open = false }) {
@@ -375,7 +430,7 @@ private fun ProjectPicker(project: String, projects: List<String>, onPick: (Stri
 }
 
 @Composable
-private fun Chip(icon: ImageVector, label: String?, tint: Color?, onClick: () -> Unit) {
+private fun Chip(icon: ImageVector, label: String?, tint: Color?, ai: Boolean = false, onClick: () -> Unit) {
     OutlinedButton(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
@@ -387,6 +442,10 @@ private fun Chip(icon: ImageVector, label: String?, tint: Color?, onClick: () ->
         if (label != null) {
             Spacer(Modifier.width(6.dp))
             Text(label, color = tint ?: MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, maxLines = 1)
+        }
+        if (ai) {
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Filled.AutoAwesome, "AI suggestion", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
         }
     }
 }

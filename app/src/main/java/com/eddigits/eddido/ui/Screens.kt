@@ -174,9 +174,11 @@ fun EddiDoApp(repo: TaskRepository) {
             projects = projects,
             defaultProject = (screen as? Screen.Project)?.name,
             defaultToday = screen == Screen.Today,
+            previewChoices = repo::previewChoices,
+            previewDates = repo::previewDates,
             onDismiss = { adding = false },
-        ) { text, desc, manual ->
-            val t = repo.addFromText(text, desc, manual)
+        ) { text, desc, manual, fallbackToday ->
+            val t = repo.addFromText(text, desc, manual, fallbackToday)
             scope.launch {
                 snackbar.currentSnackbarData?.dismiss()
                 snackbar.showSnackbar("Added “${t.title}”" + (t.due?.let { " · " + dueLabel(it, t.hasTime) } ?: ""))

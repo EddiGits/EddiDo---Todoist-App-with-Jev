@@ -41,6 +41,12 @@ object QuickAddParser {
     private const val WD_ANY = "mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?"
     private const val MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
     private const val NUM = "\\d+|an?|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty five|half an?"
+    /** English with common typos, plus Tamil (naalai, nalaiki) and Hindi (kal). */
+    private const val TOMORROW = "to?m+[ao]r+[ao]w*|tmrw|tmr|tmw|2mrw|naa?l(?:ai|a|e)k*[iu]?|kal"
+    private const val MORNING = "morn\\w*|mrng|kaa?l(?:ai|a)y?i?(?:la|le|l)?|subh?ah?"
+    private const val AFTERNOON = "aftern\\w*|ma(?:dh|th)iy?a?m\\w*|dopa?h[ae]r"
+    private const val EVENING = "even(?:ing|in|ng)|evng|eveing|evning|saa?yan\\w*|shaa?m"
+    private const val NIGHT = "night|nite|raa?th?i?ri\\w*|raath?"
     private const val UNIT = "seconds?|secs?|minutes?|mins?|m|hours?|hrs?|h|days?|weeks?|months?"
 
     private class Ctx(val text: String) {
@@ -129,7 +135,7 @@ object QuickAddParser {
                 val n = m.groupValues[1].trim().let { if (it == "other") 2 else it.toIntOrNull() ?: 1 }
                 recurrence = Recurrence(unitOf(m.groupValues[2]), n); return@run
             }
-            c.find("\\b(?:every\\s*day|daily|each\\s+day)\\b", SpanKind.REPEAT)?.let { recurrence = Recurrence(RepeatUnit.DAY); return@run }
+            c.find("\\b(?:every\\s*day|daily|each\\s+day|dhinamum|thinamum|dinamum|roz|rozana|har\\s+din)\\b", SpanKind.REPEAT)?.let { recurrence = Recurrence(RepeatUnit.DAY); return@run }
             c.find("\\bhourly\\b", SpanKind.REPEAT)?.let { recurrence = Recurrence(RepeatUnit.HOUR); return@run }
             c.find("\\bweekly\\b", SpanKind.REPEAT)?.let { recurrence = Recurrence(RepeatUnit.WEEK); return@run }
             c.find("\\bmonthly\\b", SpanKind.REPEAT)?.let { recurrence = Recurrence(RepeatUnit.MONTH); return@run }
@@ -155,7 +161,7 @@ object QuickAddParser {
         var time: LocalTime? = null
         if (due == null) {
             time = findTime(c, preferMorning = wake || explicitReminder == ReminderKind.ALARM)
-            if (time == null && c.find("\\btonight\\b", SpanKind.DATE) != null) {
+            if (time == null && c.find("\\b(?:tonight|tonite|2nite|aaj\\s+raat)\\b", SpanKind.DATE) != null) {
                 date = date ?: today; time = LocalTime.of(20, 0)
             }
             if (time == null) time = partOfDay
@@ -202,9 +208,9 @@ object QuickAddParser {
     }
 
     private fun findDate(c: Ctx, today: LocalDate): LocalDate? {
-        c.find("\\b(?:day\\s+after\\s+tomorrow|overmorrow)\\b", SpanKind.DATE)?.let { return today.plusDays(2) }
-        c.find("\\b(?:tomorrow|tmrw|tmr|tomorow|tommorow|tommorrow)\\b", SpanKind.DATE)?.let { return today.plusDays(1) }
-        c.find("\\btoday\\b", SpanKind.DATE)?.let { return today }
+        c.find("\\b(?:day\\s+after\\s+(?:$TOMORROW)|overmorrow|naa?lann?[ai]i?k+[iu]|marunaal|parso|parson)\\b", SpanKind.DATE)?.let { return today.plusDays(2) }
+        c.find("\\b(?:$TOMORROW)\\b", SpanKind.DATE)?.let { return today.plusDays(1) }
+        c.find("\\b(?:today|tday|2day|aaj|inn?[ai]i?k+[iu]|indru|inru)\\b", SpanKind.DATE)?.let { return today }
         c.find("\\b(?:this\\s+)?weekend\\b", SpanKind.DATE)?.let {
             return if (today.dayOfWeek == DayOfWeek.SUNDAY) today else today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY))
         }
@@ -242,29 +248,45 @@ object QuickAddParser {
     }
 
     private fun findTime(c: Ctx, preferMorning: Boolean): LocalTime? {
+        // "morning", "kalaila", "shaam"... both a time on its own and a hint for "7" vs "19".
+        val pod = c.find("\\b(?:in\\s+the\\s+|this\\s+|at\\s+)?($MORNING|$AFTERNOON|$EVENING|$NIGHT)\\b", SpanKind.TIME)
+            ?.let { podName(it.groupValues[1]) }
+
         c.find("(?:\\b(?:at|by|@)\\s*)?\\b(\\d{1,2})(?:[:.](\\d{2}))?\\s*(a\\.?m\\.?|p\\.?m\\.?)(?![a-z])", SpanKind.TIME)?.let { m ->
             var h = m.groupValues[1].toInt() % 12
             if (m.groupValues[3].lowercase().startsWith("p")) h += 12
             val min = m.groupValues[2].toIntOrNull() ?: 0
             if (h in 0..23 && min in 0..59) return LocalTime.of(h, min)
         }
-        c.find("(?:\\b(?:at|by)\\s+)?\\b([01]?\\d|2[0-3])[:.]([0-5]\\d)\\b(?!\\s*(?:%|/))", SpanKind.TIME)?.let { m ->
+        // Times without am/pm: "at 7", "7:30", "7 baje" (Hindi), "7 manikku" (Tamil), "7 o'clock"
+        val ambiguous = c.find("(?:\\b(?:at|by)\\s+)?\\b([01]?\\d|2[0-3])[:.]([0-5]\\d)\\b(?!\\s*(?:%|/))", SpanKind.TIME)
+            ?: c.find("\\b(\\d{1,2})(?:[:.]([0-5]\\d))?\\s*(?:baje|bje|mani(?:kku|ku|ki)?|o'?\\s?clock)\\b", SpanKind.TIME)
+            ?: c.find("\\b(?:at|by${if (preferMorning) "|for" else ""})\\s+(\\d{1,2})\\b(?!\\s*(?:%|/|-|min|mins|minutes?|hours?|hrs?|days?|weeks?|months?|years?|st|nd|rd|th))", SpanKind.TIME)
+        ambiguous?.let { m ->
             val h = m.groupValues[1].toInt()
-            val t = LocalTime.of(h, m.groupValues[2].toInt())
-            // "at 7:30" without am/pm: assume the next sensible one.
-            return if (h in 1..6 && !preferMorning) t.plusHours(12) else t
-        }
-        c.find("\\b(?:at|by${if (preferMorning) "|for" else ""})\\s+(\\d{1,2})\\b(?!\\s*(?:%|/|-|min|mins|minutes?|hours?|hrs?|days?|weeks?|months?|years?|st|nd|rd|th))", SpanKind.TIME)?.let { m ->
-            val h = m.groupValues[1].toInt()
-            if (h in 0..23) return LocalTime.of(if (h in 1..6 && !preferMorning) h + 12 else h, 0)
+            val min = m.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
+            if (h in 0..23) {
+                val hour = when {
+                    h >= 12 -> h
+                    pod == "morning" -> h
+                    pod != null -> h + 12
+                    h in 1..6 && !preferMorning -> h + 12
+                    else -> h
+                }
+                return LocalTime.of(hour % 24, min)
+            }
         }
         c.find("\\b(?:at\\s+)?(noon|midday|midnight)\\b", SpanKind.TIME)?.let { m ->
             return if (m.groupValues[1].lowercase() == "midnight") LocalTime.of(23, 59) else LocalTime.NOON
         }
-        c.find("\\b(?:in\\s+the\\s+|this\\s+|at\\s+)?(morning|afternoon|evening|night)\\b", SpanKind.TIME)?.let { m ->
-            return partOfDayTime(m.groupValues[1])
-        }
-        return null
+        return pod?.let(::partOfDayTime)
+    }
+
+    private fun podName(word: String): String = when {
+        Regex("(?i)^(?:$MORNING)$").matches(word) -> "morning"
+        Regex("(?i)^(?:$AFTERNOON)$").matches(word) -> "afternoon"
+        Regex("(?i)^(?:$EVENING)$").matches(word) -> "evening"
+        else -> "night"
     }
 
     private fun partOfDayTime(p: String): LocalTime = when (p.lowercase()) {

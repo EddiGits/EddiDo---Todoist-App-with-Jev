@@ -10,6 +10,9 @@ import com.eddigits.eddido.model.Task
 import com.eddigits.eddido.parse.ParsedTask
 import com.eddigits.eddido.parse.QuickAddParser
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
@@ -21,7 +24,9 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * All tasks, kept in memory and saved as one JSON file. Small, dependency-free and
@@ -52,8 +57,18 @@ class TaskRepository private constructor(
      * Quick add: save instantly from the offline parse, then let the AI refine
      * project/labels/priority in the background.
      */
-    fun addFromText(text: String, description: String = "", manual: ManualChoices = ManualChoices()): Task {
+    /**
+     * @param fallbackToday adding from the Today view: date the task today when nothing
+     *   else gives a date. It is a soft default, so a date the AI reads still replaces it.
+     */
+    fun addFromText(
+        text: String,
+        description: String = "",
+        manual: ManualChoices = ManualChoices(),
+        fallbackToday: Boolean = false,
+    ): Task {
         val parsed = QuickAddParser.parse(text)
+        val softToday = fallbackToday && !manual.dueSet && parsed.due == null
         val task = manual.applyTo(
             Task(
                 id = System.currentTimeMillis(),
@@ -70,6 +85,7 @@ class TaskRepository private constructor(
                 sourceText = text,
             ),
         ).let { t -> t.copy(project = ensureProject(t.project)) }
+            .let { t -> if (softToday) t.copy(due = LocalDate.now().atStartOfDay(), hasTime = false) else t }
         upsert(task)
         // Anything the user chose with a chip counts as explicit, same as typed "p1" or "#work".
         val explicit = parsed.copy(
@@ -78,7 +94,7 @@ class TaskRepository private constructor(
             project = manual.project ?: parsed.project,
             explicitReminder = manual.reminder ?: parsed.explicitReminder,
         )
-        scope.launch { refineWithAi(task.id, explicit, dueLocked = manual.dueSet || manual.recurrenceSet) }
+        scope.launch { refineWithAi(task.id, explicit, dueLocked = manual.dueSet || manual.recurrenceSet, softDue = softToday) }
         return task
     }
 
@@ -87,27 +103,52 @@ class TaskRepository private constructor(
      * [ai] picks project/labels/priority/reminder (Jev: ~0.4 s), and [dateAi] reads a date
      * only when the offline parser found none, e.g. Tamil or Hindi text.
      */
-    private suspend fun refineWithAi(id: Long, parsed: ParsedTask, dueLocked: Boolean) = coroutineScope {
+    private suspend fun refineWithAi(id: Long, parsed: ParsedTask, dueLocked: Boolean, softDue: Boolean) = coroutineScope {
         val text = get(id)?.sourceText ?: return@coroutineScope
-        val dates = dateAi
-        if (dates != null && parsed.due == null && !dueLocked) launch {
-            runCatching { dates.analyze(text, _projects.value, LocalDateTime.now()) }.getOrNull()
-                ?.let { r -> merge(id, parsed, dueLocked, r.copy(project = null, labels = emptyList(), priority = null), finish = false) }
+        if (parsed.due == null && !dueLocked) launch {
+            previewDates(text)?.let { r -> merge(id, parsed, dueLocked, softDue, r.copy(project = null, labels = emptyList(), priority = null), finish = false) }
         }
-        val result = runCatching { ai.analyze(text, _projects.value, LocalDateTime.now()) }.getOrNull()
+        val result = previewChoices(text)
         if (result == null) get(id)?.let { upsert(it.copy(aiPending = false)) }
-        else merge(id, parsed, dueLocked, result, finish = true)
+        else merge(id, parsed, dueLocked, softDue, result, finish = true)
+    }
+
+    // ── AI answers, cached per text so the live preview and the save share one call ──
+
+    private val aiCache = ConcurrentHashMap<String, Deferred<AiResult?>>()
+
+    private fun cached(kind: String, text: String, provider: TaskAi): Deferred<AiResult?> {
+        val key = "$kind|${LocalDate.now()}|${text.trim().lowercase()}"
+        if (aiCache.size > 200) aiCache.clear()
+        val d = aiCache.getOrPut(key) {
+            scope.async(start = CoroutineStart.LAZY) {
+                runCatching { provider.analyze(text.trim(), _projects.value, LocalDateTime.now()) }.getOrNull()
+                    .also { if (it == null) aiCache.remove(key) } // failed: let the next attempt retry
+            }
+        }
+        d.start()
+        return d
+    }
+
+    /** Project, labels, priority and alarm-vs-notification (Jev when a TypeSafe key is set). */
+    suspend fun previewChoices(text: String): AiResult? = cached("choices", text, ai).await()
+
+    /** A date the offline parser could not read; null when the parser already has one. */
+    suspend fun previewDates(text: String): AiResult? {
+        val provider = dateAi ?: return null
+        if (QuickAddParser.parse(text).due != null) return null
+        return cached("dates", text, provider).await()
     }
 
     /** Read-merge-write under the lock so the two passes never overwrite each other. */
-    private fun merge(id: Long, parsed: ParsedTask, dueLocked: Boolean, result: AiResult, finish: Boolean) {
-        synchronized(lock) { mergeLocked(id, parsed, dueLocked, result, finish) }
+    private fun merge(id: Long, parsed: ParsedTask, dueLocked: Boolean, softDue: Boolean, result: AiResult, finish: Boolean) {
+        synchronized(lock) { mergeLocked(id, parsed, dueLocked, softDue, result, finish) }
     }
 
-    private fun mergeLocked(id: Long, parsed: ParsedTask, dueLocked: Boolean, result: AiResult, finish: Boolean) {
+    private fun mergeLocked(id: Long, parsed: ParsedTask, dueLocked: Boolean, softDue: Boolean, result: AiResult, finish: Boolean) {
         val latest = get(id) ?: return
         // The user's explicit words always win over the AI's guess.
-        val aiDue = result.due?.takeIf { !dueLocked && parsed.due == null && latest.due == null && it.isAfter(LocalDateTime.now().minusMinutes(1)) }
+        val aiDue = result.due?.takeIf { !dueLocked && parsed.due == null && (latest.due == null || softDue) && it.isAfter(LocalDateTime.now().minusMinutes(1)) }
         var refined = latest.copy(
             // If the AI found a date the parser missed, the parser's title still contains the date words.
             title = if (parsed.title.isBlank() || aiDue != null) result.title ?: latest.title else latest.title,

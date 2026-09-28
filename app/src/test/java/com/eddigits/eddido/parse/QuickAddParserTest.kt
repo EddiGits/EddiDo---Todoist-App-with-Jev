@@ -125,4 +125,39 @@ class QuickAddParserTest {
         assertEquals(Recurrence(RepeatUnit.HOUR, 2), r.recurrence)
         assertEquals(now.plusHours(2), r.due)
     }
+
+    // Typos and Tamil/Hindi, as typed on the phone
+    @Test fun typos() {
+        val r = p("Phone mom tomorrrow morninnng")
+        assertEquals("Phone mom", r.title)
+        assertEquals(LocalDateTime.of(2026, 9, 29, 9, 0), r.due)
+    }
+
+    @Test fun tamilTomorrow() {
+        val r = p("Nalaki ammaku call pannu")
+        assertEquals("Ammaku call pannu", r.title)
+        assertEquals(LocalDateTime.of(2026, 9, 29, 0, 0), r.due)
+    }
+
+    @Test fun tamilEveningTime() {
+        val r = p("naalai saayangalam 6 manikku doctor")
+        assertEquals("Doctor", r.title)
+        assertEquals(LocalDateTime.of(2026, 9, 29, 18, 0), r.due)
+    }
+
+    @Test fun hindiMorning() {
+        val r = p("kal subah 7 baje gym jaana hai")
+        assertEquals(LocalDateTime.of(2026, 9, 29, 7, 0), r.due)
+        assertTrue(r.hasTime)
+    }
+
+    @Test fun eveningHintMakesItPm() {
+        assertEquals(LocalDateTime.of(2026, 9, 29, 19, 30), p("dinner tomorrow evening 7:30").due)
+    }
+
+    @Test fun englishWordsNotMistaken() {
+        val r = p("buy rat trap and kale")
+        assertNull(r.due)
+        assertEquals("Buy rat trap and kale", r.title)
+    }
 }
