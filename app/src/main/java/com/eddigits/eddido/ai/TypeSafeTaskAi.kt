@@ -13,8 +13,8 @@ import java.time.LocalDateTime
 
 /**
  * TypeSafe's Jev (System One): one call answers every question below in parallel,
- * in a few hundred milliseconds. Jev only *chooses*; it never writes text or does
- * date math, so title/due stay with [com.eddigits.eddido.parse.QuickAddParser].
+ * in a few hundred milliseconds. Jev only *chooses*; it cannot write a title or work
+ * out a date, so those come from the language model ([OpenRouterTaskAi]).
  * Everything TypeSafe-specific lives in this file.
  */
 class TypeSafeTaskAi(
@@ -68,12 +68,13 @@ class TypeSafeTaskAi(
             )
             .put(
                 "reminder",
+                // Wording tuned on real phrases (16/17 right; the miss was low-confidence).
                 choice(
-                    "How should the person be alerted when it is due",
+                    "Does the person want to be alerted at a specific moment for this to-do item",
                     JSONObject()
-                        .put("alarm", "They want a ringing alarm, to be woken up, or a timer")
-                        .put("notify", "A normal reminder notification")
-                        .put("none", "No alert needed"),
+                        .put("alarm", "They want it to ring loudly: an alarm, being woken up, or a timer")
+                        .put("notify", "They ask to be reminded, or they give a clock time or part of day (morning, evening, tonight, 6pm, in 20 minutes, every 2 hours)")
+                        .put("none", "A plain to-do with no reminder request and no time of day; a date or weekday alone does not count"),
                 ),
             )
         LABELS.forEach { (label, question) -> q.put("label_$label", JSONObject().put("type", "noul").put("instructions", question)) }
@@ -86,27 +87,24 @@ class TypeSafeTaskAi(
     private fun parse(a: JSONObject): AiResult {
         val project = a.optJSONObject("project")?.takeIf { it.optDouble("confidence") >= 0.35 }?.optString("choice")
         val score = a.optJSONObject("priority")?.optDouble("score") ?: 0.0
-        val priority = when {
-            score >= 2.5 -> 1
-            score >= 1.8 -> 2
-            else -> null
+        val reminder = a.optJSONObject("reminder")?.takeIf { it.optDouble("confidence") >= 0.5 }?.let {
+            when (it.optString("choice")) {
+                "alarm" -> ReminderKind.ALARM
+                "notify" -> ReminderKind.NOTIFY
+                "none" -> ReminderKind.NONE
+                else -> null
+            }
         }
-        val reminder = when (a.optJSONObject("reminder")?.optString("choice")) {
-            "alarm" -> ReminderKind.ALARM
-            "notify" -> ReminderKind.NOTIFY
-            else -> null
-        }
-        val labels = LABELS.keys.filter { (a.optJSONObject("label_$it")?.optDouble("noul") ?: 0.0) >= 0.7 }
         return AiResult(
-            title = null,
-            project = project?.takeIf { it.isNotBlank() },
-            labels = labels,
-            priority = priority,
-            reminder = reminder,
-            due = null,
-            hasTime = false,
-            recurrence = null,
             provider = "typesafe/$model",
+            project = project?.takeIf { it.isNotBlank() },
+            labels = LABELS.keys.filter { (a.optJSONObject("label_$it")?.optDouble("noul") ?: 0.0) >= 0.7 },
+            priority = when {
+                score >= 2.5 -> 1
+                score >= 1.8 -> 2
+                else -> 4
+            },
+            reminder = reminder,
         )
     }
 

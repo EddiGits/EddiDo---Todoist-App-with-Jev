@@ -76,6 +76,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.eddigits.eddido.ai.AiResult
 import com.eddigits.eddido.data.ManualChoices
+import com.eddigits.eddido.data.TaskResolver
 import com.eddigits.eddido.model.Recurrence
 import com.eddigits.eddido.model.ReminderKind
 import com.eddigits.eddido.model.RepeatUnit
@@ -105,8 +106,8 @@ fun QuickAddSheet(
     projects: List<String>,
     defaultProject: String?,
     defaultToday: Boolean,
-    previewChoices: suspend (String) -> AiResult?,
-    previewDates: suspend (String) -> AiResult?,
+    previewJev: suspend (String) -> AiResult?,
+    previewLanguage: suspend (String) -> AiResult?,
     onDismiss: () -> Unit,
     onSubmit: (text: String, description: String, manual: ManualChoices, fallbackToday: Boolean) -> Unit,
 ) {
@@ -116,10 +117,10 @@ fun QuickAddSheet(
     var manual by remember { mutableStateOf(ManualChoices(project = defaultProject)) }
     val parsed = remember(text) { QuickAddParser.parse(text) }
 
-    // Live AI: once typing pauses, ask Jev (and, if no date was found, the date reader).
-    // Answers are cached, so saving afterwards reuses them instead of calling again.
-    var aiChoices by remember { mutableStateOf<Pair<String, AiResult>?>(null) }
-    var aiDates by remember { mutableStateOf<Pair<String, AiResult>?>(null) }
+    // Live AI: once typing pauses, ask Jev (~0.4 s) and the language model (~2–5 s) in parallel.
+    // Answers are cached, so saving reuses them instead of asking again.
+    var jev by remember { mutableStateOf<Pair<String, AiResult>?>(null) }
+    var language by remember { mutableStateOf<Pair<String, AiResult>?>(null) }
     var aiBusy by remember { mutableStateOf(false) }
     LaunchedEffect(text) {
         val t = text.trim()
@@ -127,44 +128,33 @@ fun QuickAddSheet(
         delay(500)
         aiBusy = true
         coroutineScope {
-            launch { previewChoices(t)?.let { aiChoices = t to it } }
-            launch { previewDates(t)?.let { aiDates = t to it } }
+            launch { previewJev(t)?.let { jev = t to it } }
+            launch { previewLanguage(t)?.let { language = t to it } }
         }
         aiBusy = false
     }
     val current = text.trim()
-    val ai = aiChoices?.takeIf { it.first == current }?.second
-    val aiDate = (aiDates?.takeIf { it.first == current }?.second ?: ai)?.takeIf { it.due != null }
-
-    val aiDerived = mutableSetOf<String>()
-    val fields = run {
-        var due: LocalDateTime? = null
-        var hasTime = false
-        when {
-            manual.dueSet -> { due = manual.due; hasTime = manual.hasTime }
-            parsed.due != null -> { due = parsed.due; hasTime = parsed.hasTime }
-            aiDate != null -> { due = aiDate.due; hasTime = aiDate.hasTime; aiDerived += "date" }
-            // Adding from the Today view dates the task today unless something else gives a date.
-            defaultToday -> due = LocalDateTime.now().toLocalDate().atStartOfDay()
-        }
-        val priority = manual.priority ?: parsed.priority ?: ai?.priority?.also { aiDerived += "priority" } ?: 4
-        val project = manual.project ?: parsed.project ?: ai?.project?.also { aiDerived += "project" } ?: Task.INBOX
-        val reminder = manual.reminder ?: parsed.explicitReminder ?: when {
-            !hasTime -> ReminderKind.NONE
-            ai?.reminder == ReminderKind.ALARM -> ReminderKind.ALARM.also { aiDerived += "reminder" }
-            else -> ReminderKind.NOTIFY
-        }
-        TaskFields(
-            due = due,
-            hasTime = hasTime,
-            priority = priority,
-            reminder = reminder,
-            recurrence = if (manual.recurrenceSet) manual.recurrence else parsed.recurrence ?: aiDate?.recurrence,
-            project = project,
-            labels = (parsed.labels + manual.labels + (ai?.labels ?: emptyList())).distinct(),
-            aiDerived = aiDerived,
-        )
-    }
+    // Same decision as the saved task (see TaskResolver), so what you see is what you get.
+    val resolved = TaskResolver.resolve(
+        text = current,
+        parsed = parsed,
+        manual = manual,
+        jev = jev?.takeIf { it.first == current }?.second,
+        language = language?.takeIf { it.first == current }?.second,
+        offlineProject = null,
+        fallbackToday = defaultToday,
+        now = LocalDateTime.now(),
+    )
+    val fields = TaskFields(
+        due = resolved.due,
+        hasTime = resolved.hasTime,
+        priority = resolved.priority,
+        reminder = resolved.reminder,
+        recurrence = resolved.recurrence,
+        project = resolved.project,
+        labels = resolved.labels,
+        aiDerived = resolved.aiDerived,
+    )
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
@@ -205,13 +195,13 @@ fun QuickAddSheet(
                     Icon(Icons.Filled.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(4.dp))
                     val status = when {
-                        ai != null -> buildList {
-                            ai.project?.let { add(it) }
-                            if (ai.labels.isNotEmpty()) add(ai.labels.joinToString(", ") { "@$it" })
-                            aiDate?.due?.let { add(dueLabel(it, aiDate.hasTime)) }
-                        }.joinToString(" · ").ifEmpty { "No suggestions" } + if (aiBusy) " …" else ""
+                        resolved.aiDerived.isNotEmpty() -> buildList {
+                            if ("title" in resolved.aiDerived && resolved.title != current) add("“${resolved.title}”")
+                            if ("project" in resolved.aiDerived) add(resolved.project)
+                            if ("labels" in resolved.aiDerived) resolved.labels.takeIf { it.isNotEmpty() }?.let { l -> add(l.joinToString(" ") { "@$it" }) }
+                        }.joinToString(" · ").ifEmpty { "AI agrees" } + if (aiBusy) " …" else ""
                         aiBusy -> "Thinking…"
-                        else -> "AI suggests a project, labels and dates as you type"
+                        else -> "AI reads the date, time, repeat and project as you type"
                     }
                     Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }

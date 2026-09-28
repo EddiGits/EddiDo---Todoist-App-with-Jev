@@ -6,23 +6,32 @@ import com.eddigits.eddido.model.ReminderKind
 import java.time.LocalDateTime
 
 /**
- * What the AI decides about a typed task. Every provider returns this same shape,
- * so the rest of the app never sees an API format.
+ * What an AI provider decides about a typed task. Every provider returns this shape,
+ * so the rest of the app never sees an API format. A provider leaves out what it
+ * cannot answer: Jev only chooses (project, labels, priority, reminder); the language
+ * model also writes the title and works out dates and repeats.
  *
- * Fields are hints: [com.eddigits.eddido.data.TaskRepository] keeps anything the user
- * typed explicitly (#project, p1, "alarm", a parsed date) over what the AI suggests.
+ * [com.eddigits.eddido.data.TaskResolver] turns these into the final task.
  */
 data class AiResult(
-    val title: String?,
-    val project: String?,
-    val labels: List<String>,
-    val priority: Int?,
-    val reminder: ReminderKind?,
-    /** Only used when the deterministic parser found no date at all. */
-    val due: LocalDateTime?,
-    val hasTime: Boolean,
-    val recurrence: Recurrence?,
     val provider: String,
+    /** Clean title in the user's own words; null when this provider does not write titles. */
+    val title: String? = null,
+    /** True when this provider answered the date question; [due] null then means "no date". */
+    val dateAnswered: Boolean = false,
+    val due: LocalDateTime? = null,
+    val hasTime: Boolean = false,
+    val recurrence: Recurrence? = null,
+    val project: String? = null,
+    /** A project the user named with #name. */
+    val explicitProject: String? = null,
+    val labels: List<String> = emptyList(),
+    /** 1 (urgent) … 4 (normal); null when this provider does not judge priority. */
+    val priority: Int? = null,
+    /** The user wrote p1–p4, urgent, asap or important. */
+    val explicitPriority: Boolean = false,
+    /** null when this provider does not decide, or is not confident enough. */
+    val reminder: ReminderKind? = null,
 )
 
 /**
@@ -35,32 +44,19 @@ interface TaskAi {
 }
 
 /**
- * The one place providers are chosen. With a TypeSafe key, Jev does the choosing and
- * OpenRouter only reads dates the offline parser missed; without one, OpenRouter does both.
- * Any failure falls back to the offline keyword rules.
+ * The one place providers are chosen, from the keys in secrets.properties.
+ * - [jev]: TypeSafe Jev, ~0.4 s. Project, labels, priority, reminder.
+ * - [language]: an OpenRouter chat model, ~2–5 s. Everything, including title, dates and repeats.
+ * - [offline]: keyword rules, used only when the AI cannot be reached.
  */
 object AiProvider {
-    private val hasJev get() = BuildConfig.TYPESAFE_API_KEY.isNotBlank()
-
-    /** Picks project, labels, priority and reminder kind. */
-    val choices: TaskAi by lazy {
-        if (hasJev) FallbackTaskAi(TypeSafeTaskAi(), FallbackTaskAi(OpenRouterTaskAi(), OfflineTaskAi()))
-        else FallbackTaskAi(OpenRouterTaskAi(), OfflineTaskAi())
-    }
-
-    /** Reads dates the offline parser could not; null when [choices] already does it. */
-    val dates: TaskAi? by lazy { if (hasJev) OpenRouterTaskAi() else null }
+    val jev: TaskAi? by lazy { if (BuildConfig.TYPESAFE_API_KEY.isNotBlank()) TypeSafeTaskAi() else null }
+    val language: TaskAi? by lazy { if (BuildConfig.OPENROUTER_API_KEY.isNotBlank()) OpenRouterTaskAi() else null }
+    val offline = OfflineTaskAi()
 
     val label: String
-        get() = when {
-            hasJev -> "TypeSafe ${BuildConfig.JEV_MODEL}" + if (BuildConfig.OPENROUTER_API_KEY.isNotBlank()) " · dates via OpenRouter" else ""
-            BuildConfig.OPENROUTER_API_KEY.isNotBlank() -> "OpenRouter · ${BuildConfig.OPENROUTER_MODEL}"
-            else -> "offline keyword sorting (no key)"
-        }
-}
-
-/** Tries [primary]; if it fails or is not configured, uses [fallback]. */
-class FallbackTaskAi(private val primary: TaskAi, private val fallback: TaskAi) : TaskAi {
-    override suspend fun analyze(text: String, projects: List<String>, now: LocalDateTime): AiResult? =
-        primary.analyze(text, projects, now) ?: fallback.analyze(text, projects, now)
+        get() = listOfNotNull(
+            jev?.let { "Jev ${BuildConfig.JEV_MODEL}" },
+            language?.let { "OpenRouter ${BuildConfig.OPENROUTER_MODEL}" },
+        ).joinToString(" + ").ifEmpty { "offline keyword sorting (no key)" }
 }

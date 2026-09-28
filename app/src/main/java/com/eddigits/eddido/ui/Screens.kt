@@ -174,8 +174,8 @@ fun EddiDoApp(repo: TaskRepository) {
             projects = projects,
             defaultProject = (screen as? Screen.Project)?.name,
             defaultToday = screen == Screen.Today,
-            previewChoices = repo::previewChoices,
-            previewDates = repo::previewDates,
+            previewJev = repo::previewJev,
+            previewLanguage = repo::previewLanguage,
             onDismiss = { adding = false },
         ) { text, desc, manual, fallbackToday ->
             val t = repo.addFromText(text, desc, manual, fallbackToday)

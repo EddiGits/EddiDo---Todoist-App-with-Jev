@@ -17,18 +17,9 @@ class OfflineTaskAi : TaskAi {
         "Personal" to "birthday|anniversary|call mom|call dad|family|friend|party|movie|trip|travel|book tickets|gift",
     ).map { (p, words) -> p to Regex("(?i)\\b(?:$words)") }
 
-    override suspend fun analyze(text: String, projects: List<String>, now: LocalDateTime): AiResult {
-        val project = rules.firstOrNull { it.second.containsMatchIn(text) }?.first
-        return AiResult(
-            title = null,
-            project = project,
-            labels = emptyList(),
-            priority = null,
-            reminder = null,
-            due = null,
-            hasTime = false,
-            recurrence = null,
-            provider = "offline",
-        )
-    }
+    /** The project the keyword rules suggest, or null. */
+    fun projectFor(text: String): String? = rules.firstOrNull { it.second.containsMatchIn(text) }?.first
+
+    override suspend fun analyze(text: String, projects: List<String>, now: LocalDateTime): AiResult =
+        AiResult(provider = "offline", project = projectFor(text))
 }

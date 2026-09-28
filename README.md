@@ -11,21 +11,33 @@ Type a task in plain words and EddiDo works out the rest:
 | `gym every mon, wed and fri 6:30am` | Repeats on those days |
 | `buy milk, eggs and bread` | The AI files it under Shopping and adds the `groceries` label |
 
-The design follows [Shapeshift](https://github.com/anishfn/shapeshift): **the AI decides, the code computes.**
+The AI side is inspired by [Shapeshift](https://github.com/anishfn/shapeshift). Here the AI decides as much as it can, including dates, and the code keeps an offline copy of each rule as a backup.
 
-- `parse/QuickAddParser.kt` reads dates, times, repeats, priority, `#project` and `@labels` in code, offline and instantly. The words it recognises are highlighted as you type.
-- `ai/` then sorts the task into a project and adds labels in the background. Anything you typed or picked yourself wins over the AI.
+- `ai/` reads the whole task as you type: Jev picks the project, labels, priority and reminder, and a language model writes the title and works out the date, time and repeat, in English, Tamil or Hindi.
+- `parse/QuickAddParser.kt` fills the chips instantly while the AI is thinking, and is the backup when there is no internet.
 - `alarm/` rings exact alarms (`setAlarmClock`, shown full screen over the lock screen) or posts notifications, with Done and Snooze buttons. It re-arms repeating tasks and restores alarms after a reboot.
 
-## AI providers
+## Who decides what
 
-| Provider | Job | Speed |
+The AI decides everything it can. The app's own code only fills the chips instantly while the AI is thinking, and stands in when there is no internet.
+
+| Field | Decided by | Fallback (offline / while waiting) |
 |---|---|---|
-| **TypeSafe Jev** (`ai/TypeSafeTaskAi.kt`) | Picks project, labels, priority and alarm-vs-notification in one call | ~0.4 s |
-| **OpenRouter** (`ai/OpenRouterTaskAi.kt`) | Reads dates the offline parser can't (Tamil/Hindi, "before Diwali"). It does everything when no TypeSafe key is set | ~2.5 s |
-| **Offline** (`ai/OfflineTaskAi.kt`) | Keyword rules, used when both calls fail | instant |
+| Title (date words removed, typos fixed) | Language model (OpenRouter) | Parser |
+| Date, time, repeat | Language model | Parser |
+| Reminder on/off, alarm vs notification | **Jev** (if ≥50% confident), else language model | Parser |
+| Project | **Jev**; `#name` typed by you via the language model | Keyword rules |
+| Priority | **Jev**; `p1`–`p4` / "urgent" typed by you via the language model | Parser |
+| Labels | **Jev** (7 yes/no questions) + language model (`@label` and suggestions) | Parser (`@label`) |
+| Ringing the alarm at the right moment | App (Android `AlarmManager`), since the AI can't do this | — |
 
-`AiProvider` in `ai/TaskAi.kt` is the only place that picks between them, based on which keys are set in `secrets.properties`. The two calls run side by side, and each answer is applied as soon as it arrives. Jev only *chooses*; dates and times come from the parser in code, as in Shapeshift.
+Chips you pick yourself always win. `data/TaskResolver.kt` holds these rules in one place. The live chips and the saved task both use it, so they always match. Safety checks: a date from the AI that is in the past is ignored, and a date you clearly typed is kept if the model misses it.
+
+| Provider | File | Speed |
+|---|---|---|
+| TypeSafe Jev (`TYPESAFE_API_KEY`) | `ai/TypeSafeTaskAi.kt` | ~0.4 s |
+| OpenRouter (`OPENROUTER_API_KEY`), `typesafe/jev-router`, DeepSeek as backup | `ai/OpenRouterTaskAi.kt` | ~2–5 s |
+| Offline keyword rules | `ai/OfflineTaskAi.kt` | instant |
 
 ## Build
 
