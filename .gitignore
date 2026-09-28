@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+# Holds the OpenRouter key and signing passwords. Never commit.
+secrets.properties
+*.jks
+*.keystore
+*.apk
+.idea/
+*.iml
