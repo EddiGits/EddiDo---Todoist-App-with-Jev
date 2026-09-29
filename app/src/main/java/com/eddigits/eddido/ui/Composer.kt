@@ -211,7 +211,15 @@ fun Composer(
         // The preview morphs between tabs: the new one springs in from the side the tab
         // moved to, the old one shrinks away quickly.
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            AnimatedContent(
+            // Nothing typed yet: say plainly how this works, with examples to tap.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = current.isEmpty(),
+                enter = fadeIn(Motion.fade()) + scaleIn(Motion.settle(), 0.94f),
+                exit = fadeOut(Motion.exit()) + scaleOut(Motion.exit(), 0.96f),
+            ) {
+                TypeNaturallyHint(accent) { example -> text = example }
+            }
+            if (current.isNotEmpty()) AnimatedContent(
                 targetState = draft.kind,
                 transitionSpec = {
                     if (reduce) fadeIn(Motion.fade()) togetherWith fadeOut(Motion.fade())
@@ -285,7 +293,7 @@ fun Composer(
             PlainField(
                 value = text,
                 onValueChange = { text = it },
-                placeholder = placeholderFor(decider.kind),
+                placeholder = if (current.isEmpty()) cyclingExample() else placeholderFor(decider.kind),
                 big = false,
                 singleLine = false,
                 modifier = Modifier.weight(1f).focusRequester(focus),
@@ -315,6 +323,58 @@ fun Composer(
         }
     }
 }
+}
+
+/** Examples for the welcome screen and the text box: a mix of languages and tabs. */
+private val EXAMPLES = listOf(
+    "Call mom tomorrow 7pm",
+    "naalai saayangalam 6 manikku doctor",
+    "kal subah 7 baje gym",
+    "10 min timer for tea",
+    "Buy milk, eggs and bread",
+    "Days until Diwali",
+    "Drink water 8 times a day",
+    "Focus 25 min on report",
+)
+
+/** Shapeshift-style cycling placeholder: a new example every few seconds while the box is empty. */
+@Composable
+private fun cyclingExample(): String {
+    var i by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(2600); i = (i + 1) % EXAMPLES.size } }
+    return EXAMPLES[i] + "…"
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TypeNaturallyHint(accent: Color, onExample: (String) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            "Type it the way you'd say it",
+            fontSize = 26.sp, fontWeight = FontWeight.SemiBold, lineHeight = 32.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "In any language: English, தமிழ், हिंदी, or a mix.\nThe right tab opens by itself and the details fill in as you type.",
+            fontSize = 15.sp, lineHeight = 21.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Spacer(Modifier.height(20.dp))
+        Text("Try one", fontSize = 13.sp, color = accent, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            EXAMPLES.take(6).forEach { e ->
+                AssistChip(onClick = { onExample(e) }, label = { Text(e, fontSize = 13.sp) })
+            }
+        }
+    }
 }
 
 private fun placeholderFor(k: Kind) = when (k) {

@@ -289,7 +289,7 @@ internal fun ProjectPicker(
             Icon(if (project == Task.INBOX) Icons.Outlined.Inbox else Icons.Outlined.Tag, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(6.dp))
             Text(project, color = MaterialTheme.colorScheme.onSurface)
-            if (ai) Icon(Icons.Filled.AutoAwesome, "AI suggestion", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp).size(12.dp))
+            if (ai) Icon(Icons.Filled.AutoAwesome, "Understood from your words", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp).size(12.dp))
             Icon(Icons.Filled.ArrowDropDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         DropdownMenu(open, { open = false }) {
@@ -325,7 +325,7 @@ private fun Chip(icon: ImageVector, label: String?, tint: Color?, ai: Boolean = 
         }
         if (ai) {
             Spacer(Modifier.width(4.dp))
-            Icon(Icons.Filled.AutoAwesome, "AI suggestion", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+            Icon(Icons.Filled.AutoAwesome, "Understood from your words", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
         }
     }
 }

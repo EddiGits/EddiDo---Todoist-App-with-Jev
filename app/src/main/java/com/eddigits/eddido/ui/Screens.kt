@@ -377,7 +377,7 @@ private fun TaskListScreen(screen: Screen, all: List<Task>, onToggle: (Task) -> 
                 }.sortedWith(taskOrder)
                 items(list, key = { it.id }) { TaskRow(it, screen !is Screen.Project && screen != Screen.Inbox, { onToggle(it) }, { onOpen(it) }, Modifier.animateItem()) }
                 if (list.isEmpty()) item {
-                    if (screen == Screen.Inbox) Empty("Your inbox is clear", "New tasks land here until the AI sorts them into a project")
+                    if (screen == Screen.Inbox) Empty("Your inbox is clear", "Tasks without a project land here")
                     else Empty("No tasks here", "")
                 }
             }
@@ -430,16 +430,6 @@ private fun BrowseScreen(tasks: List<Task>, projects: List<String>, onOpen: (Scr
         }
         item { SectionHeader("More", 0) }
         item { BrowseRow(Icons.Outlined.CheckCircle, "Completed", tasks.count { it.completed }) { onOpen(Screen.Completed) } }
-        item {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.AutoAwesome, null, tint = Brand, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "AI: ${com.eddigits.eddido.ai.AiProvider.label}",
-                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 

@@ -104,7 +104,7 @@ private fun Placeholder(s: String) = Text(s, color = MaterialTheme.colorScheme.o
 
 @Composable
 private fun AiMark(on: Boolean) {
-    if (on) Icon(Icons.Filled.AutoAwesome, "AI", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp).size(12.dp))
+    if (on) Icon(Icons.Filled.AutoAwesome, "Understood from your words", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp).size(12.dp))
 }
 
 // ── Task ──
@@ -217,7 +217,7 @@ private fun TimerPreview(draft: Draft) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 RollingText(formatClock(draft.durationSeconds.toLong()), BigDigits, countingDown = false)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if ("duration" in draft.aiDetails) "set by AI" else "timer", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                    Text("timer", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                     AiMark("duration" in draft.aiDetails)
                 }
             }
