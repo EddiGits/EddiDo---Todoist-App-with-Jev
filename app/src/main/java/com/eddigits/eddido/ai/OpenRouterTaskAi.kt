@@ -6,6 +6,7 @@ import com.eddigits.eddido.model.Kind
 import com.eddigits.eddido.model.Recurrence
 import com.eddigits.eddido.model.ReminderKind
 import com.eddigits.eddido.model.RepeatUnit
+import com.eddigits.eddido.parse.Festivals
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -24,12 +25,12 @@ import java.time.temporal.ChronoUnit
 class OpenRouterTaskAi(
     private val apiKey: String = BuildConfig.OPENROUTER_API_KEY,
     private val models: List<Model> = listOf(
-        // Most accurate in testing (17/17 on real phrases), 3–7 s.
-        Model(BuildConfig.OPENROUTER_MODEL),
-        // Backup: ~2 s with thinking off, a little less accurate.
+        // Best mix in a 9-model benchmark: 16/17 right, ~1.9 s, ~$0.0002 a call, thinking off.
         Model("deepseek/deepseek-v4.1-flash", fast = true),
+        // Backup: 17/17 but ~3.7 s.
+        Model(BuildConfig.OPENROUTER_MODEL),
     ).distinctBy { it.id },
-) : TaskAi {
+) : TaskAi, TimingHelper {
 
     data class Model(val id: String, val fast: Boolean = false)
 
@@ -43,6 +44,51 @@ class OpenRouterTaskAi(
         }
         return null
     }
+
+    /**
+     * The short job Jev hands over when it needs help: Jev has already chosen the tab,
+     * project and reminder, so only the title and the timing are asked for.
+     */
+    override suspend fun fillTiming(text: String, jev: AiResult, now: LocalDateTime): AiResult? {
+        if (apiKey.isBlank()) return null
+        val decided = listOfNotNull(
+            jev.kind?.let { "type = ${it.key}" },
+            jev.project?.let { "project = $it" },
+            jev.reminder?.let { "alert = ${it.name.lowercase()}" },
+        ).joinToString(", ")
+        for (model in models) {
+            val result = runCatching {
+                post(model, timingPrompt(decided, now), text)?.let { parse(it, "${model.id} (asked by Jev)") }
+                    ?.let { r -> r.copy(title = r.title?.replaceFirstChar { it.uppercase() }, project = null, labels = emptyList(), priority = null, reminder = null, kind = null) }
+            }.onFailure { Log.w(TAG, "OpenRouter ${model.id} failed: ${it.message}") }.getOrNull()
+            if (result != null) return result
+        }
+        return null
+    }
+
+    private fun timingPrompt(decided: String, now: LocalDateTime) = """
+        You fill in the timing of one typed to-do item for an app. Another model has already decided: $decided.
+        Only answer what is still missing: the title and when it happens.
+        The text may mix English with Tamil or Hindi written in English letters, and may have typos.
+
+        Current local date-time: ${now.truncatedTo(ChronoUnit.MINUTES)} (${now.dayOfWeek}).
+
+        Reply with ONLY one JSON object, no prose, no code fences:
+        {
+          "title": the task itself in the user's own words, with every date, time, repeat and reminder word removed; for a countdown, the event name,
+          "due": local date-time "YYYY-MM-DDTHH:MM", or null when no timing is given,
+          "has_time": true when a time of day or part of day is given,
+          "repeat": null or {"unit": "day|week|month|year", "interval": N, "days": ["MONDAY", ...]}
+        }
+
+        Rules:
+        - Festivals and holidays: use the actual date of the next one. "Eve" is the day before; "before X" is the day before X.
+          For these, use exactly: ${Festivals.upcoming(now.toLocalDate())}. For any other festival or holiday, use your own knowledge of its next date.
+        - "Last Friday of the month", "third Saturday": work out the next such date. Repeat only when the text says so (every, each, daily…); otherwise repeat is null.
+        - Morning 09:00, afternoon 14:00, evening 18:00, night 21:00. A reminder with no time uses 09:00.
+        - Only a personal date you cannot know (my birthday, payday) gives due null.
+        - The due must never be in the past.
+    """.trimIndent()
 
     private suspend fun call(model: Model, text: String, projects: List<String>, now: LocalDateTime): AiResult? =
         withContext(Dispatchers.IO) {
@@ -79,6 +125,39 @@ class OpenRouterTaskAi(
                 conn.disconnect()
             }
         }
+
+    /** One chat completion; returns the reply text. */
+    private suspend fun post(model: Model, system: String, user: String): String? = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("model", model.id)
+            .put("temperature", 0)
+            .put("max_tokens", 600)
+            .put("messages", JSONArray()
+                .put(JSONObject().put("role", "system").put("content", system))
+                .put(JSONObject().put("role", "user").put("content", user)))
+        if (model.fast) {
+            body.put("reasoning", JSONObject().put("enabled", false))
+            body.put("response_format", JSONObject().put("type", "json_object"))
+        }
+        val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 8_000
+            readTimeout = 25_000
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("X-Title", "EddiDo")
+        }
+        try {
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = conn.responseCode
+            val raw = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) error("HTTP $code ${raw.take(200)}")
+            JSONObject(raw).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content")
+        } finally {
+            conn.disconnect()
+        }
+    }
 
     private fun systemPrompt(projects: List<String>, now: LocalDateTime) = """
         You turn one typed to-do item into structured fields for a Todoist-like app.

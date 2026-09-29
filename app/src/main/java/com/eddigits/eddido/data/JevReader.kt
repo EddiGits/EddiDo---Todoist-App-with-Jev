@@ -96,6 +96,20 @@ object JevReader {
         )
     }
 
+    /**
+     * Merge the chat model's answer (asked only because Jev said it needed help) with Jev's
+     * own decisions: Jev still decides whether it repeats, and your explicit p1/#/@ stand.
+     */
+    fun withHelp(raw: AiResult, base: AiResult?, jev: AiResult): AiResult = raw.copy(
+        title = raw.title?.takeIf { it.isNotBlank() } ?: base?.title,
+        recurrence = if (jev.meaning?.repeat == "none") null else raw.recurrence,
+        explicitProject = base?.explicitProject,
+        labels = base?.labels.orEmpty(),
+        priority = base?.priority,
+        explicitPriority = base?.explicitPriority == true,
+        durationSeconds = base?.durationSeconds,
+    )
+
     private fun titleOnly(text: String, parsed: ParsedTask, m: JevMeaning, jev: AiResult) = AiResult(
         provider = "jev+code",
         title = title(text, parsed, m),
@@ -112,13 +126,21 @@ object JevReader {
      */
     fun title(text: String, parsed: ParsedTask, m: JevMeaning): String? {
         if (m.words.isEmpty()) return null
+        // Plain "wake me up at 6" / "alarm at 7" / "10 min timer": nothing but the alarm itself,
+        // and the parser already names it; Jev's per-word answers wobble on "wake"/"up".
+        if (parsed.title == "Wake up" || parsed.title == "Alarm" || parsed.title.startsWith("Timer ·")) return null
         val claimed = parsed.spans.filter { it.kind != SpanKind.REMINDER && it.kind != SpanKind.REPEAT }.map { it.range }
         val kept = Regex("\\S+").findAll(text).mapIndexedNotNull { i, w ->
             val inSpan = claimed.any { r -> w.range.first <= r.last && r.first <= w.range.last }
             w.value.takeUnless { i in m.schedulingWords || inSpan }
         }.joinToString(" ")
-        return QuickAddParser.tidy(kept).replaceFirstChar { it.uppercase() }.ifBlank { null }
+        val title = QuickAddParser.tidy(kept)
+        // "wake me up at 6" leaves just "me": nothing left to name the task, so the parser's title stands.
+        if (title.split(' ').all { it.lowercase() in FILLER }) return null
+        return title.replaceFirstChar { it.uppercase() }
     }
+
+    private val FILLER = setOf("", "me", "my", "i", "please", "pls", "plz", "a", "an", "the", "to", "it", "enakku", "mujhe")
 
     private fun timeOf(parsed: ParsedTask, m: JevMeaning): LocalTime? {
         val clock = parsed.spans.firstOrNull { it.kind == SpanKind.TIME && it.text.any(Char::isDigit) }

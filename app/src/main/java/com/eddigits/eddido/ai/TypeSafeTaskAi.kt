@@ -113,17 +113,24 @@ class TypeSafeTaskAi(
             .put("night", "Night or tonight").put("clock", "Only a clock time such as 7pm or 6:30").put("none", "No time of day")))
         q.put("meridiem", choice("If a clock time is given, is it before or after noon", JSONObject()
             .put("am", "Before noon (a.m., morning)").put("pm", "After noon (p.m., afternoon, evening, night)").put("none", "No clock time")))
-        q.put("repeat", choice("Does the person ask for this to happen again and again on a schedule", JSONObject()
-            .put("none", "No: it happens once, even if it is tied to a date, weekday or yearly festival")
+        q.put("repeat", choice("Do the words themselves say this happens again and again (every, each, daily, weekly, dhinamum, roz…)", JSONObject()
+            .put("none", "No repeat word is used: it happens once, even if such tasks usually recur (like paying rent) or it is tied to a date, weekday or festival")
             .put("daily", "Every day").put("weekdays", "Every weekday, Monday to Friday")
             .put("weekly", "Every week, or every given weekday").put("monthly", "Every month").put("yearly", "Every year")
             .put("hourly", "Every hour or every few hours").put("minutes", "Every few minutes")))
         q.put("unit", choice("What unit is the length of time in", JSONObject()
             .put("seconds", "Seconds").put("minutes", "Minutes (e.g. min, nimisham)").put("hours", "Hours (e.g. hr, mani neram)").put("none", "No length of time")))
-        q.put("festival", choice("Which festival or holiday is named", JSONObject().apply {
+        q.put("festival", choice("Which festival or holiday is named by its name", JSONObject().apply {
             Festivals.names.forEach { (key, label) -> put(key, label) }
-            put("none", "No festival")
+            put("other", "A different named festival or holiday, such as Ganesh Chaturthi, Good Friday or Ramzan, or the eve of a listed one")
+            put("none", "No festival or holiday is named; a plain date such as 14 feb is not a festival")
         }))
+        // Jev decides by itself whether a chat model is needed (31/31 on test phrases with the
+        // cut-offs in meaning()): only for dates that need a rule or knowledge Jev can't pick.
+        q.put("calc", JSONObject().put("type", "noul").put("instructions",
+            "Finding the date needs a rule or private knowledge: a numbered or last weekday of a month (third Saturday, last Friday, first Monday), " +
+                "a number of days before or after an event, a moon phase, or a personal date like my birthday or payday. " +
+                "Counting down to a date, or doing something before a named festival, does not count"))
         // One yes/no per word: code drops the words that only say when/how, leaving the title.
         words.forEachIndexed { i, w ->
             q.put("w$i", JSONObject().put("type", "noul").put("instructions",
@@ -146,7 +153,8 @@ class TypeSafeTaskAi(
             meridiem = pick("meridiem"),
             repeat = pick("repeat", 0.6),
             unit = pick("unit"),
-            festival = pick("festival", 0.6)?.takeIf { it != "none" },
+            festival = pick("festival", 0.6)?.takeIf { it != "none" && it != "other" },
+            needsHelp = pick("festival", 0.5) == "other" || (a.optJSONObject("calc")?.optDouble("noul") ?: 0.0) >= 0.75,
             words = words,
             schedulingWords = words.indices.filter { (a.optJSONObject("w$it")?.optDouble("noul") ?: 0.0) >= 0.5 }.toSet(),
         )

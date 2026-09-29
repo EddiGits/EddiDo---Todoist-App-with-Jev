@@ -68,7 +68,17 @@ data class JevMeaning(
     /** The words Jev was asked about, and which of them only say when/how/remind (not the task). */
     val words: List<String> = emptyList(),
     val schedulingWords: Set<Int> = emptySet(),
+    /**
+     * Jev's own verdict that the date needs more than its options: another festival, or a
+     * rule such as "last Friday of the month". Only then is a chat model asked.
+     */
+    val needsHelp: Boolean = false,
 )
+
+/** A chat model that fills in only what Jev could not: the title and the timing. */
+interface TimingHelper {
+    suspend fun fillTiming(text: String, jev: AiResult, now: LocalDateTime): AiResult?
+}
 
 /**
  * The single seam for AI. Each provider (TypeSafe, OpenRouter, offline) implements
@@ -87,7 +97,10 @@ interface TaskAi {
  */
 object AiProvider {
     val jev: TaskAi? by lazy { if (BuildConfig.TYPESAFE_API_KEY.isNotBlank()) TypeSafeTaskAi() else null }
-    /** Off unless USE_OPENROUTER=true: the app runs on Jev plus its own parser, like Shapeshift. */
+    /** Asked only when Jev says it needs help (see [JevMeaning.needsHelp]); off without an OpenRouter key. */
+    val helper: TimingHelper? by lazy { if (BuildConfig.OPENROUTER_API_KEY.isNotBlank()) OpenRouterTaskAi() else null }
+
+    /** Off unless USE_OPENROUTER=true: a chat model on every pause as well (costlier). */
     val language: TaskAi? by lazy {
         if (BuildConfig.USE_OPENROUTER && BuildConfig.OPENROUTER_API_KEY.isNotBlank()) OpenRouterTaskAi() else null
     }

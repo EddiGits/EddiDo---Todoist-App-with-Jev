@@ -4,6 +4,7 @@ import android.content.Context
 import com.eddigits.eddido.ai.AiProvider
 import com.eddigits.eddido.ai.AiResult
 import com.eddigits.eddido.ai.TaskAi
+import com.eddigits.eddido.ai.TimingHelper
 import com.eddigits.eddido.alarm.ReminderScheduler
 import com.eddigits.eddido.model.Task
 import com.eddigits.eddido.parse.ParsedTask
@@ -35,6 +36,7 @@ class TaskRepository private constructor(
     private val context: Context,
     private val jevAi: TaskAi? = AiProvider.jev,
     private val languageAi: TaskAi? = AiProvider.language,
+    private val helperAi: TimingHelper? = AiProvider.helper,
 ) {
     private val file = File(context.filesDir, "tasks.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -88,12 +90,18 @@ class TaskRepository private constructor(
             pending[task.id] = pend
             scope.launch {
                 coroutineScope {
-                    if (!pend.jevDone) launch {
-                        val r = cached(JEV, pend.text, jevAi!!).await()
-                        applyAnswer(task.id) { jev = r; jevDone = true }
+                    if (jevAi != null) launch {
+                        val r = if (pend.jevDone) pend.jev else cached(JEV, pend.text) { jevAi.analyze(pend.text, _projects.value, LocalDateTime.now()) }.await()
+                        val help = r?.meaning?.needsHelp == true && languageAi == null && helperAi != null
+                        applyAnswer(task.id) { jev = r; jevDone = true; helpPending = help }
+                        // Jev said the date needs more than it can choose: one call to the chat model.
+                        if (help) {
+                            val h = previewHelp(pend.text, r!!)
+                            applyAnswer(task.id) { if (h != null) language = h; helpPending = false }
+                        }
                     }
                     if (!pend.languageDone) launch {
-                        val r = cached(LANGUAGE, pend.text, languageAi!!).await()
+                        val r = cached(LANGUAGE, pend.text) { languageAi!!.analyze(pend.text, _projects.value, LocalDateTime.now()) }.await()
                         applyAnswer(task.id) { language = r; languageDone = true }
                     }
                 }
@@ -116,6 +124,7 @@ class TaskRepository private constructor(
     ) {
         var jevDone = false
         var languageDone = false
+        var helpPending = false
         var written: Task? = null
 
         fun toTask(base: Task): Task {
@@ -134,7 +143,7 @@ class TaskRepository private constructor(
                 project = ensureProject(r.project),
                 labels = r.labels,
                 reminder = r.reminder,
-                aiPending = !(jevDone && languageDone),
+                aiPending = !(jevDone && languageDone) || helpPending,
             ).let { t ->
                 if (habitPerDay == null) t
                 else t.copy(
@@ -185,13 +194,13 @@ class TaskRepository private constructor(
     /** Answers expire after two minutes, so "in 20 minutes" is never read against a stale clock. */
     private fun fresh(e: CacheEntry?) = e != null && System.currentTimeMillis() - e.createdAt < CACHE_MS
 
-    private fun cached(kind: String, text: String, provider: TaskAi): Deferred<AiResult?> {
+    private fun cached(kind: String, text: String, compute: suspend () -> AiResult?): Deferred<AiResult?> {
         val key = key(kind, text)
         if (aiCache.size > 200) aiCache.clear()
         val entry = aiCache.compute(key) { _, old ->
             if (fresh(old)) old else CacheEntry(
                 scope.async(start = CoroutineStart.LAZY) {
-                    runCatching { provider.analyze(text.trim(), _projects.value, LocalDateTime.now()) }.getOrNull()
+                    runCatching { compute() }.getOrNull()
                         .also { if (it == null) aiCache.remove(key) } // failed: let the next attempt retry
                 },
                 System.currentTimeMillis(),
@@ -207,10 +216,25 @@ class TaskRepository private constructor(
         aiCache[key(kind, text)]?.takeIf { fresh(it) && it.answer.isCompleted }?.let { runCatching { it.answer.getCompleted() }.getOrNull() }
 
     /** Jev's choices for the live chips (~0.4 s); null without a TypeSafe key. */
-    suspend fun previewJev(text: String): AiResult? = jevAi?.let { cached(JEV, text, it).await() }
+    suspend fun previewJev(text: String): AiResult? =
+        jevAi?.let { ai -> cached(JEV, text) { ai.analyze(text.trim(), _projects.value, LocalDateTime.now()) }.await() }
+
+    /**
+     * Only when Jev itself said it needs help: the chat model fills in the title and timing.
+     * What you typed explicitly (p1, #project, @label) and Jev's own reading still stand.
+     */
+    suspend fun previewHelp(text: String, jev: AiResult): AiResult? {
+        val helper = helperAi ?: return null
+        if (languageAi != null || jev.meaning?.needsHelp != true) return null
+        val raw = cached(HELP, text) { helper.fillTiming(text.trim(), jev, LocalDateTime.now()) }.await() ?: return null
+        val now = LocalDateTime.now()
+        val base = JevReader.read(text.trim(), QuickAddParser.parse(text.trim(), now), jev, now)
+        return JevReader.withHelp(raw, base, jev)
+    }
 
     /** The language model's full reading for the live chips (~2–5 s); null without an OpenRouter key. */
-    suspend fun previewLanguage(text: String): AiResult? = languageAi?.let { cached(LANGUAGE, text, it).await() }
+    suspend fun previewLanguage(text: String): AiResult? =
+        languageAi?.let { ai -> cached(LANGUAGE, text) { ai.analyze(text.trim(), _projects.value, LocalDateTime.now()) }.await() }
 
     fun upsert(task: Task) {
         synchronized(lock) {
@@ -319,6 +343,7 @@ class TaskRepository private constructor(
     companion object {
         private const val JEV = "jev"
         private const val LANGUAGE = "language"
+        private const val HELP = "help"
         private const val CACHE_MS = 2 * 60_000L
 
         val DEFAULT_PROJECTS = listOf(Task.INBOX, "Personal", "Work", "Shopping", "Health", "Finance", "Home", "Study")

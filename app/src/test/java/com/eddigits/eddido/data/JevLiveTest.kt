@@ -99,5 +99,6 @@ class JevLiveTest {
         val d = draft("wake me up at 6")
         assertEquals(next(LocalTime.of(6, 0)), d.task.due)
         assertEquals(ReminderKind.ALARM, d.task.reminder)
+        assertEquals("Wake up", d.task.title)
     }
 }

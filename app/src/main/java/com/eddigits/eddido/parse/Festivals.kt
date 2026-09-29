@@ -34,6 +34,10 @@ object Festivals {
 
     fun label(key: String): String = names.firstOrNull { it.first == key }?.second?.substringBefore(" /") ?: key
 
+    /** "Diwali 2026-11-08, Pongal 2027-01-15, …": the table, for the chat model's prompt. */
+    fun upcoming(today: LocalDate): String =
+        names.mapNotNull { (key, _) -> next(key, today)?.let { "${label(key)} $it" } }.joinToString(", ")
+
     /** The next date of [key] on or after [today], or null when the table has none. */
     fun next(key: String, today: LocalDate): LocalDate? {
         fixed[key]?.let { md ->

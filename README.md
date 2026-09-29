@@ -41,7 +41,11 @@ As in Shapeshift: **Jev decides, code computes.** One Jev call per typing pause 
 
 The parser (`parse/QuickAddParser.kt`) fills the chips instantly before Jev answers and works offline. Chips you pick yourself always win. `data/TaskResolver.kt` holds the rules for both the live chips and the saved task. Live tests of the real API: `JEV_KEY=… ./gradlew testDebugUnitTest --tests '*JevLiveTest*'`.
 
-**Optional chat model:** set `USE_OPENROUTER=true` in `secrets.properties` and an OpenRouter model also writes titles and reads dates the parser can't ("before Diwali"). It's a second call per pause (~2–5 s) and costs more. `ai/OpenRouterTaskAi.kt` is kept for this.
+**When Jev asks for help:** the same Jev call also decides whether a chat model is needed. That happens only for dates Jev can't choose from its options: a festival not in the table (Ganesh Chaturthi, Good Friday, Ramzan, Christmas Eve), or a rule or personal knowledge (last Friday of the month, two days after Pongal, full moon, my birthday). It routed 31/31 test phrases correctly. Only then, and only after you stop typing, one call goes to OpenRouter (`deepseek/deepseek-v4.1-flash`, thinking off, ~2 s, ~$0.0002). That call is told what Jev already decided and fills in just the title and timing. Jev's own answers (tab, project, reminder, whether it repeats) and anything you typed explicitly still stand. Everyday phrases never reach it. With no OpenRouter key, the app runs on Jev alone.
+
+`USE_OPENROUTER=true` instead calls the chat model on every pause (costlier; not recommended).
+
+Live tests of both APIs: `JEV_KEY=… OPENROUTER_KEY=… ./gradlew testDebugUnitTest --tests '*LiveTest*'`.
 
 ## Build
 

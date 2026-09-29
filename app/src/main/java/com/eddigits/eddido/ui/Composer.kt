@@ -128,6 +128,12 @@ fun Composer(
                 if (r != null) {
                     jev = t to r
                     if (r.kindProbabilities.isNotEmpty()) decider = KindDecider.decide(decider, r.kindProbabilities, t)
+                    // Jev decided it needs help with the date: ask the chat model once, after a
+                    // longer pause, so a half-typed phrase never costs a call.
+                    if (r.meaning?.needsHelp == true) {
+                        delay(600)
+                        repo.previewHelp(t, r)?.let { language = t to it }
+                    }
                 } else {
                     // No Jev key, or no internet: the offline guess keeps the tab following along.
                     KindGuess.kind(t)?.let { g -> decider = KindDecider.decide(decider, mapOf(g to 0.75), t) }
