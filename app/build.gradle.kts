@@ -22,12 +22,14 @@ android {
         applicationId = "com.eddigits.eddido"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "2.0.0"
+        versionCode = 7
+        versionName = "2.0.1"
 
         buildConfigField("String", "OPENROUTER_API_KEY", "\"${secret("OPENROUTER_API_KEY")}\"")
         buildConfigField("String", "TYPESAFE_API_KEY", "\"${secret("TYPESAFE_API_KEY")}\"")
         buildConfigField("String", "JEV_MODEL", "\"${secret("JEV_MODEL", "jev-latest")}\"")
+        // Off by default: Jev decides, code computes (as in Shapeshift). Set USE_OPENROUTER=true to add the chat model back.
+        buildConfigField("boolean", "USE_OPENROUTER", secret("USE_OPENROUTER", "false"))
         buildConfigField("String", "OPENROUTER_MODEL", "\"${secret("OPENROUTER_MODEL", "typesafe/jev-router")}\"")
     }
 

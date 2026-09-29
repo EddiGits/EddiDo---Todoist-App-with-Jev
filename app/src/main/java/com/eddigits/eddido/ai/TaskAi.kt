@@ -58,12 +58,15 @@ interface TaskAi {
 /**
  * The one place providers are chosen, from the keys in secrets.properties.
  * - [jev]: TypeSafe Jev, ~0.4 s. Project, labels, priority, reminder.
- * - [language]: an OpenRouter chat model, ~2–5 s. Everything, including title, dates and repeats.
+ * - [language]: an OpenRouter chat model, ~2–5 s. Title, dates and repeats. Off by default.
  * - [offline]: keyword rules, used only when the AI cannot be reached.
  */
 object AiProvider {
     val jev: TaskAi? by lazy { if (BuildConfig.TYPESAFE_API_KEY.isNotBlank()) TypeSafeTaskAi() else null }
-    val language: TaskAi? by lazy { if (BuildConfig.OPENROUTER_API_KEY.isNotBlank()) OpenRouterTaskAi() else null }
+    /** Off unless USE_OPENROUTER=true: the app runs on Jev plus its own parser, like Shapeshift. */
+    val language: TaskAi? by lazy {
+        if (BuildConfig.USE_OPENROUTER && BuildConfig.OPENROUTER_API_KEY.isNotBlank()) OpenRouterTaskAi() else null
+    }
     val offline = OfflineTaskAi()
 
     val label: String

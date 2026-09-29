@@ -13,8 +13,8 @@ Type a task in plain words and EddiDo works out the rest:
 
 The AI side is inspired by [Shapeshift](https://github.com/anishfn/shapeshift). Here the AI decides as much as it can, including dates, and the code keeps an offline copy of each rule as a backup.
 
-- `ai/` reads the whole task as you type: Jev picks the project, labels, priority and reminder, and a language model writes the title and works out the date, time and repeat, in English, Tamil or Hindi.
-- `parse/QuickAddParser.kt` fills the chips instantly while the AI is thinking, and is the backup when there is no internet.
+- `ai/`: Jev picks the tab, project, labels, priority and reminder as you type.
+- `parse/`: code reads dates, times, repeats, durations and list items, in English, Tamil or Hindi.
 - `alarm/` rings exact alarms (`setAlarmClock`, shown full screen over the lock screen) or posts notifications, with Done and Snooze buttons. It re-arms repeating tasks and restores alarms after a reboot.
 
 ## Tabs and the creator
@@ -27,27 +27,20 @@ Animations use Shapeshift's spring values (`ui/motion/Motion.kt`), turned down t
 
 ## Who decides what
 
-The AI decides everything it can. The app's own code only fills the chips instantly while the AI is thinking, and stands in when there is no internet.
+As in Shapeshift: **Jev decides, code computes.** One Jev call per typing pause (~0.4 s) answers every question at once. The app's own code reads the values (dates, times, durations, items). There's no chat model by default.
 
-| Field | Decided by | Fallback (offline / while waiting) |
-|---|---|---|
-| Title (date words removed, typos fixed) | Language model (OpenRouter) | Parser |
-| Date, time, repeat | Language model | Parser |
-| Reminder on/off, alarm vs notification | **Jev** (if ≥50% confident), else language model | Parser |
-| Project | **Jev**; `#name` typed by you via the language model | Keyword rules |
-| Priority | **Jev**; `p1`–`p4` / "urgent" typed by you via the language model | Parser |
-| Labels | **Jev** (7 yes/no questions) + language model (`@label` and suggestions) | Parser (`@label`) |
-| Which tab (task, timer, habit…) | **Jev** (24/24 right in testing) | Keyword rules |
-| Timer length, list items, habit times per day, countdown date | Language model | Parser |
-| Ringing the alarm at the right moment | App (Android `AlarmManager`), since the AI can't do this | — |
+| Field | Decided by |
+|---|---|
+| Which tab (task, timer, habit…) | **Jev** (24/24 right in testing) |
+| Project, priority, labels, reminder on/off, alarm vs notification | **Jev** |
+| Title, date, time, repeat, `#project`, `@label`, `p1` | Parser (`parse/QuickAddParser.kt`): English with typos, Tamil and Hindi words |
+| Timer/focus length, list items, times per day | Parser (`parse/KindGuess.kt`) |
+| Ringing at the right moment | Android `AlarmManager` |
+| Chips you pick yourself | Always win |
 
-Chips you pick yourself always win. `data/TaskResolver.kt` holds these rules in one place. The live chips and the saved task both use it, so they always match. Safety checks: a date from the AI that is in the past is ignored, and a date you clearly typed is kept if the model misses it.
+`data/TaskResolver.kt` holds these rules in one place, for both the live chips and the saved task. If Jev can't be reached, keyword rules pick the tab and project.
 
-| Provider | File | Speed |
-|---|---|---|
-| TypeSafe Jev (`TYPESAFE_API_KEY`) | `ai/TypeSafeTaskAi.kt` | ~0.4 s |
-| OpenRouter (`OPENROUTER_API_KEY`), `typesafe/jev-router`, DeepSeek as backup | `ai/OpenRouterTaskAi.kt` | ~2–5 s |
-| Offline keyword rules | `ai/OfflineTaskAi.kt` | instant |
+**Optional chat model:** set `USE_OPENROUTER=true` in `secrets.properties` and an OpenRouter model also writes titles and reads dates the parser can't ("before Diwali"). It's a second call per pause (~2–5 s) and costs more. `ai/OpenRouterTaskAi.kt` is kept for this.
 
 ## Build
 

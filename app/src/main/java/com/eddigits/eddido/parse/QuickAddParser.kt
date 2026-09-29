@@ -118,10 +118,14 @@ object QuickAddParser {
         ) explicitReminder = ReminderKind.NOTIFY
         if (c.find("\\b(?:no\\s+reminder|silently)\\b", SpanKind.REMINDER) != null) explicitReminder = ReminderKind.NONE
 
+        // Countdown and habit phrasing: not part of the title ("days until Diwali" → "Diwali").
+        c.find("\\b(?:how\\s+many\\s+)?days?\\s+(?:until|till|to\\s+go\\s+(?:for|until|till)|left\\s+(?:for|until|till|to)|to)\\b(?=\\s+\\S)|\\bcount\\s?down\\s+(?:to|till|until|for)\\b", SpanKind.DATE)
+        val timesADay = c.find("\\b\\d+\\s+times\\s+(?:a|per|every)\\s+day\\b", SpanKind.REPEAT)
+
         // Repeats
-        var recurrence: Recurrence? = null
+        var recurrence: Recurrence? = if (timesADay != null) Recurrence(RepeatUnit.DAY) else null
         var partOfDay: LocalTime? = null
-        run {
+        if (recurrence == null) run {
             c.find("\\b(?:every|each)\\s+(?:week\\s?days?|work\\s?days?)\\b", SpanKind.REPEAT)?.let { recurrence = Recurrence(RepeatUnit.WEEK, days = Recurrence.WEEKDAYS); return@run }
             c.find("\\b(?:every|each)\\s+weekends?\\b", SpanKind.REPEAT)?.let { recurrence = Recurrence(RepeatUnit.WEEK, days = Recurrence.WEEKEND); return@run }
             c.find("\\b(?:every|each)\\s+((?:$WD_ANY)(?:\\s*(?:,|and|&)?\\s*(?:$WD_ANY)\\b)*)", SpanKind.REPEAT)?.let { m ->

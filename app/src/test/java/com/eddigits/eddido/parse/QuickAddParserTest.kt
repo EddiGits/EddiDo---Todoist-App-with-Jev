@@ -175,4 +175,19 @@ class QuickAddParserTest {
         assertEquals(ReminderKind.NOTIFY, r.reminder)
         assertEquals(LocalDateTime.of(2026, 9, 29, 18, 0), r.due)
     }
+
+    // Jev-only mode: the parser tidies titles for the new tabs.
+    @Test fun habitTimesADay() {
+        val r = p("drink water 8 times a day")
+        assertEquals("Drink water", r.title)
+        assertEquals(RepeatUnit.DAY, r.recurrence?.unit)
+    }
+
+    @Test fun countdownTitles() {
+        assertEquals("Diwali", p("days until Diwali").title)
+        val r = p("countdown to my birthday 14 feb")
+        assertEquals("My birthday", r.title)
+        assertEquals(LocalDateTime.of(2027, 2, 14, 0, 0), r.due)
+        assertEquals("New year", p("how many days to new year").title)
+    }
 }
