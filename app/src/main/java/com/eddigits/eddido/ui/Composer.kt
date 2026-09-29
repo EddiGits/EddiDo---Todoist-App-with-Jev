@@ -120,7 +120,7 @@ fun Composer(
         val t = text.trim()
         if (t.length < 2) { busy = false; decider = KindDecider.State(kind = decider.kind, ghost = true); return@LaunchedEffect }
         // Shapeshift waits ~120 ms; one cheap Jev call per pause, cached per text.
-        delay(150)
+        delay(120)
         busy = true
         coroutineScope {
             launch {
