@@ -3,7 +3,9 @@ package com.eddigits.eddido.data
 import com.eddigits.eddido.ai.AiResult
 import com.eddigits.eddido.model.Kind
 import com.eddigits.eddido.parse.KindGuess
+import com.eddigits.eddido.parse.Festivals
 import com.eddigits.eddido.parse.ParsedTask
+import com.eddigits.eddido.parse.QuickAddParser
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -47,12 +49,18 @@ object DraftBuilder {
     ): Draft {
         val task = TaskResolver.resolve(text, parsed, manual, jev, language, null, fallbackToday, now)
         val ai = mutableSetOf<String>()
-        // The language model only knows the details for the tab it chose itself.
+        // A chat model only knows the details for the tab it chose itself. Without one,
+        // Jev's meaning answers (read by code) apply to whichever tab is showing.
         val lang = language?.takeIf { it.kind == null || it.kind == kind }
+            ?: jev?.let { JevReader.read(text, QuickAddParser.parse(text, now), it, now) }
 
         val duration = lang?.durationSeconds?.also { ai += "duration" } ?: KindGuess.durationSeconds(text)
         val label = when (kind) {
-            Kind.NOTE -> lang?.title?.also { ai += "label" } ?: text.trim()
+            // A note is kept word for word.
+            Kind.NOTE -> if (language != null) lang?.title?.also { ai += "label" } ?: text.trim() else text.trim()
+            // "days until Diwali": if every word was about the date, name it after the festival.
+            Kind.COUNTDOWN -> task.title.takeIf { it.isNotBlank() && it != text.trim() || jev?.meaning?.festival == null }
+                ?: jev?.meaning?.festival?.let(Festivals::label)?.also { ai += "label" } ?: task.title
             Kind.TIMER, Kind.STOPWATCH, Kind.FOCUS -> lang?.title?.also { ai += "label" } ?: offlineLabel(text)
             else -> task.title
         }

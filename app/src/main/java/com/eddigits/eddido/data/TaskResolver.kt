@@ -5,6 +5,7 @@ import com.eddigits.eddido.model.Recurrence
 import com.eddigits.eddido.model.ReminderKind
 import com.eddigits.eddido.model.Task
 import com.eddigits.eddido.parse.ParsedTask
+import com.eddigits.eddido.parse.QuickAddParser
 import java.time.LocalDateTime
 
 /** The final values for a typed task, and which of them came from the AI. */
@@ -46,6 +47,9 @@ object TaskResolver {
         fallbackToday: Boolean,
         now: LocalDateTime,
     ): Resolved {
+        // No chat model: Jev's reading of the meaning, turned into values by code, takes its place.
+        @Suppress("NAME_SHADOWING")
+        val language = language ?: jev?.let { JevReader.read(text, QuickAddParser.parse(text, now), it, now) }
         val ai = mutableSetOf<String>()
 
         val title = language?.title?.takeIf { it.isNotBlank() }?.also { ai += "title" }

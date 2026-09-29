@@ -114,12 +114,13 @@ fun Composer(
     var burst by remember { mutableIntStateOf(0) }
     var accepting by remember { mutableStateOf(false) }
 
-    // Ask the AI once typing pauses. Jev (~0.4 s) moves the tab; the language model
-    // (~2–5 s) fills in titles, dates, durations and list items.
+    // Ask Jev once typing pauses (~0.4–0.8 s): one call picks the tab and the meaning
+    // (which day, part of day, repeat…), and code turns that into dates and a title.
     LaunchedEffect(text) {
         val t = text.trim()
-        if (t.isEmpty()) { busy = false; decider = KindDecider.State(kind = decider.kind, ghost = true); return@LaunchedEffect }
-        delay(350)
+        if (t.length < 2) { busy = false; decider = KindDecider.State(kind = decider.kind, ghost = true); return@LaunchedEffect }
+        // Shapeshift waits ~120 ms; one cheap Jev call per pause, cached per text.
+        delay(150)
         busy = true
         coroutineScope {
             launch {

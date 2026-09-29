@@ -44,6 +44,30 @@ data class AiResult(
     val listName: String? = null,
     /** Habit: times per day. */
     val perDay: Int? = null,
+    /** Jev's reading of the text's meaning; code turns it into dates and a title ([JevReader]). */
+    val meaning: JevMeaning? = null,
+)
+
+/**
+ * What Jev chose about the text's meaning. Each field is only set when Jev was confident
+ * enough; "none" answers are kept, because "no day is mentioned" is an answer too.
+ */
+data class JevMeaning(
+    /** today, tomorrow, day_after, weekday, this_weekend, next_week, written_date, festival, none */
+    val day: String? = null,
+    val weekday: java.time.DayOfWeek? = null,
+    /** morning, afternoon, evening, night, clock, none */
+    val part: String? = null,
+    /** am, pm, none */
+    val meridiem: String? = null,
+    /** none, daily, weekdays, weekly, monthly, yearly, hourly, minutes */
+    val repeat: String? = null,
+    /** seconds, minutes, hours, none */
+    val unit: String? = null,
+    val festival: String? = null,
+    /** The words Jev was asked about, and which of them only say when/how/remind (not the task). */
+    val words: List<String> = emptyList(),
+    val schedulingWords: Set<Int> = emptySet(),
 )
 
 /**
