@@ -6,6 +6,7 @@ import com.eddigits.eddido.model.Recurrence
 import com.eddigits.eddido.model.RepeatUnit
 import com.eddigits.eddido.parse.Festivals
 import com.eddigits.eddido.parse.KindGuess
+import com.eddigits.eddido.parse.NumberWords
 import com.eddigits.eddido.parse.ParsedTask
 import com.eddigits.eddido.parse.QuickAddParser
 import com.eddigits.eddido.parse.SpanKind
@@ -178,7 +179,7 @@ object JevReader {
     /** Code reads the number; Jev says what unit it's in (so "10 nimisham" works). */
     private fun durationSeconds(text: String, m: JevMeaning): Int? {
         KindGuess.durationSeconds(text)?.let { return it }
-        val n = Regex("\\b(\\d+(?:\\.\\d+)?)\\b").find(text)?.groupValues?.get(1)?.toDoubleOrNull() ?: return null
+        val n = Regex("(?i)\\b(${NumberWords.PATTERN})\\b").find(text)?.groupValues?.get(1)?.let(NumberWords::value) ?: return null
         return when (m.unit) {
             "seconds" -> n
             "minutes" -> n * 60

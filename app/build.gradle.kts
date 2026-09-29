@@ -22,8 +22,8 @@ android {
         applicationId = "com.eddigits.eddido"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "2.2.0"
+        versionCode = 10
+        versionName = "2.2.1"
 
         buildConfigField("String", "OPENROUTER_API_KEY", "\"${secret("OPENROUTER_API_KEY")}\"")
         buildConfigField("String", "TYPESAFE_API_KEY", "\"${secret("TYPESAFE_API_KEY")}\"")

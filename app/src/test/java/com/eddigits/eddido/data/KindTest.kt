@@ -97,4 +97,16 @@ class KindTest {
         val d = draft(Kind.TIMER, "tea 5 min", AiResult("llm", title = "Tea", kind = Kind.TASK, durationSeconds = 9999))
         assertEquals(300, d.durationSeconds)
     }
+
+    @Test fun numberWordsInTimers() {
+        // The phone screenshot: this showed the 5:00 default and the label "Two seconds only."
+        val d = draft(Kind.TIMER, "Set a timer for two seconds only.")
+        assertEquals(2, d.durationSeconds)
+        assertEquals("", d.label)
+        assertEquals(1500, KindGuess.durationSeconds("twenty five minutes focus"))
+        assertEquals(120, KindGuess.durationSeconds("rendu nimisham timer"))
+        assertEquals(600, KindGuess.durationSeconds("das minute ka timer"))
+        assertEquals(1800, KindGuess.durationSeconds("half an hour"))
+        assertEquals("Tea", draft(Kind.TIMER, "set a ten minute timer for tea").label)
+    }
 }

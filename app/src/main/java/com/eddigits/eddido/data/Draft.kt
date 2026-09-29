@@ -61,7 +61,8 @@ object DraftBuilder {
             // "days until Diwali": if every word was about the date, name it after the festival.
             Kind.COUNTDOWN -> task.title.takeIf { it.isNotBlank() && it != text.trim() || jev?.meaning?.festival == null }
                 ?: jev?.meaning?.festival?.let(Festivals::label)?.also { ai += "label" } ?: task.title
-            Kind.TIMER, Kind.STOPWATCH, Kind.FOCUS -> lang?.title?.also { ai += "label" } ?: offlineLabel(text)
+            // What it's for, without the length or command words: "Set a timer for two seconds only" → "".
+            Kind.TIMER, Kind.STOPWATCH, Kind.FOCUS -> cleanLabel(lang?.title?.also { ai += "label" } ?: text)
             else -> task.title
         }
         val items = lang?.items?.takeIf { it.isNotEmpty() }?.also { ai += "items" } ?: KindGuess.items(text)
@@ -80,11 +81,11 @@ object DraftBuilder {
         )
     }
 
-    /** "set a 10 min timer for tea" → "Tea". */
-    private fun offlineLabel(text: String): String {
-        var t = text.replace(Regex("(?i)\\b(?:set|start|begin|run|a|an|the|please|timer|stop\\s?watch|stop\\s?clock|focus|pomodoro|session|mode|on|for|with|of|vai|podu)\\b"), " ")
-        t = t.replace(Regex("(?i)\\d+(?:\\.\\d+)?\\s*(?:h|hr|hrs|hours?|m|min|mins|minutes?|nimisham|minit|s|sec|secs|seconds?)\\b"), " ")
+    /** "set a 10 min timer for tea" → "Tea"; "timer for two seconds only" → "". */
+    private fun cleanLabel(text: String): String {
+        var t = text.replace(KindGuess.DURATION, " ")
+        t = t.replace(Regex("(?i)\\b(?:set|start|begin|run|a|an|the|please|pls|only|just|timer|stop\\s?watch|stop\\s?clock|focus|pomodoro|session|mode|on|for|with|of|me|vai|podu|pannu|ka|ki|ke|lagao|karo)\\b"), " ")
         t = t.replace(Regex("(?i)\\b\\d+\\s*(?:m|min|mins|minutes?)?\\s*break\\b|\\bbreak\\b"), " ")
-        return t.replace(Regex("\\s+"), " ").trim().replaceFirstChar { it.uppercase() }
+        return t.replace(Regex("[\\s.,!;:]+"), " ").trim().replaceFirstChar { it.uppercase() }
     }
 }

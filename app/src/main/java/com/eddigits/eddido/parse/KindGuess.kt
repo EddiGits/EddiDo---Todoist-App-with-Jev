@@ -19,16 +19,20 @@ object KindGuess {
 
     fun kind(text: String): Kind? = rules.firstOrNull { it.second.containsMatchIn(text) }?.first
 
-    private val DURATION = Regex("(?i)(\\d+(?:\\.\\d+)?)\\s*(h|hr|hrs|hours?|m|min|mins|minutes?|nimisham|minit|s|sec|secs|seconds?)\\b")
+    /** Units, in English, Tamil ("nimisham", "nodi", "mani neram") and Hindi ("ghanta"). */
+    const val UNIT = "h|hr|hrs|hours?|ghante|ghanta|mani\\s*neram|m|min|mins|minutes?|nimisham|nimidam|minit|s|sec|secs|seconds?|nodi"
+
+    /** A number (digits or words, see [NumberWords]) followed by a unit: "2 seconds", "two seconds", "rendu nimisham". */
+    val DURATION = Regex("(?i)\\b(${NumberWords.PATTERN})\\s*($UNIT)\\b")
 
     /** Total seconds of every duration in the text ("1 h 30 min" = 5400), or null. */
     fun durationSeconds(text: String): Int? {
         val total = DURATION.findAll(text).sumOf { m ->
-            val n = m.groupValues[1].toDouble()
+            val n = NumberWords.value(m.groupValues[1]) ?: 0.0
             val u = m.groupValues[2].lowercase()
             when {
-                u.startsWith("h") -> n * 3600
-                u.startsWith("s") -> n
+                u.startsWith("h") || u.startsWith("gh") || u.startsWith("mani") -> n * 3600
+                u.startsWith("s") || u == "nodi" -> n
                 else -> n * 60
             }
         }
