@@ -2,6 +2,7 @@ package com.eddigits.eddido.ai
 
 import android.util.Log
 import com.eddigits.eddido.BuildConfig
+import com.eddigits.eddido.model.Kind
 import com.eddigits.eddido.model.Recurrence
 import com.eddigits.eddido.model.ReminderKind
 import com.eddigits.eddido.model.RepeatUnit
@@ -93,7 +94,7 @@ class OpenRouterTaskAi(
 
         Reply with ONLY one JSON object, no prose, no code fences:
         {
-          "title": the task itself in the user's own words and language, with every date, time, repeat, reminder, priority, #project and @label word removed; fix obvious typos; first letter capitalised,
+          "title": for a note, the full note text; for a countdown, the event name; for a timer, focus or stopwatch, what it is for (or "" if nothing); otherwise the task itself in the user's own words and language, with every date, time, repeat, reminder, priority, #project and @label word removed; fix obvious typos; first letter capitalised,
           "due": local date-time "YYYY-MM-DDTHH:MM", or null when no date, time or repeat is mentioned,
           "has_time": true when a time of day, a part of day or a relative time ("in 20 minutes") was given, or a reminder/alarm was asked for,
           "repeat": null or {"unit": "minute|hour|day|week|month|year", "interval": N, "days": ["MONDAY", ...]},
@@ -102,6 +103,12 @@ class OpenRouterTaskAi(
           "explicit_priority": true only when they wrote p1-p4, urgent, asap or important,
           "project": the best existing project, or a short new one when none fits, or "Inbox" when unsure,
           "explicit_project": the name when they wrote #name, else null,
+          "kind": "task", "timer", "stopwatch", "focus", "habit", "list", "countdown" or "note",
+          "duration_seconds": the length of a timer or of one focus session, in seconds, else null,
+          "break_minutes": the break length for a focus session, else null,
+          "items": for a list, every separate item, each capitalised (e.g. ["Milk", "Eggs", "Bread"]), else [],
+          "list_name": for a list, a short name such as "Shopping" or "Packing", else null,
+          "per_day": for a habit done several times a day, how many times, else 1,
           "labels": every word they wrote as @label (lowercase, without @), plus up to 2 helpful one-word lowercase labels
         }
 
@@ -114,6 +121,7 @@ class OpenRouterTaskAi(
         - "N min timer" or "in N minutes" = now plus N minutes.
         - A weekday name means its next occurrence after today. "12 oct" means the next 12 October.
         - The due must never be in the past.
+        - For a countdown, due is the event date (festivals: use the actual date of the next one).
     """.trimIndent()
 
     private fun parse(content: String, model: String): AiResult? {
@@ -153,6 +161,12 @@ class OpenRouterTaskAi(
                 "none" -> ReminderKind.NONE
                 else -> null
             },
+            kind = Kind.fromKey(str("kind")),
+            durationSeconds = o.optInt("duration_seconds", 0).takeIf { it > 0 },
+            breakMinutes = o.optInt("break_minutes", 0).takeIf { it > 0 },
+            items = o.optJSONArray("items")?.let { a -> (0 until a.length()).map { a.getString(it).trim() }.filter { it.isNotEmpty() } } ?: emptyList(),
+            listName = str("list_name"),
+            perDay = o.optInt("per_day", 1).coerceIn(1, 50),
         )
     }
 

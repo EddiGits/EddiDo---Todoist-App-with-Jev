@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
         val repo = TaskRepository.get(this)
         if (Build.VERSION.SDK_INT >= 33) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         if (savedInstanceState == null) handleShare(intent)
-        setContent { EddiDoTheme { EddiDoApp(repo) } }
+        setContent { EddiDoTheme { EddiDoApp(repo, com.eddigits.eddido.data.AppStore.get(this)) } }
     }
 
     override fun onNewIntent(intent: Intent) {

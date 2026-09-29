@@ -45,8 +45,9 @@ fun TaskRow(
     showProject: Boolean,
     onToggle: () -> Unit,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column {
+    Column(modifier) {
         Row(
             Modifier
                 .fillMaxWidth()

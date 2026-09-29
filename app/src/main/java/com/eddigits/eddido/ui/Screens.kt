@@ -7,6 +7,41 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import com.eddigits.eddido.data.AppStore
+import com.eddigits.eddido.model.Kind
+import com.eddigits.eddido.ui.motion.LocalReducedMotion
+import com.eddigits.eddido.ui.motion.Motion
+import com.eddigits.eddido.ui.motion.confirm
+import com.eddigits.eddido.ui.motion.reducedMotion
+import com.eddigits.eddido.ui.motion.tick
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -96,92 +131,137 @@ sealed interface Screen {
 
 private val taskOrder = compareBy<Task>({ it.due == null }, { it.due }, { it.priority }, { it.createdAt })
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EddiDoApp(repo: TaskRepository) {
+fun EddiDoApp(repo: TaskRepository, store: AppStore) {
     val tasks by repo.tasks.collectAsState()
     val projects by repo.projects.collectAsState()
+    var tab by rememberSaveable { mutableStateOf(Kind.TASK) }
     var screen by remember { mutableStateOf<Screen>(Screen.Today) }
     var root by remember { mutableStateOf<Screen>(Screen.Today) }
-    var adding by remember { mutableStateOf(false) }
+    var composing by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Long?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val view = LocalView.current
+    val reduce = remember { reducedMotion(view) }
+    var fabCenter by remember { mutableStateOf(Offset.Zero) }
+    val reveal = remember { Animatable(0f) }
 
     fun toggle(t: Task) {
         val before = t
         val after = repo.complete(t.id, !t.completed) ?: return
-        if (!before.completed) scope.launch {
-            snackbar.currentSnackbarData?.dismiss()
-            val msg = if (after.completed) "Completed" else "Next: ${after.due?.let { dueLabel(it, after.hasTime) }}"
-            if (snackbar.showSnackbar(msg, "Undo", withDismissAction = false) == SnackbarResult.ActionPerformed) repo.upsert(before)
-        }
-    }
-
-    androidx.activity.compose.BackHandler(enabled = screen != root) { screen = root }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(screen.title, fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    if (screen != root) TextButton(onClick = { screen = root }) { Text("‹ Back") }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-            )
-        },
-        bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                listOf(
-                    Triple(Screen.Inbox, Icons.Filled.Inbox, Icons.Outlined.Inbox),
-                    Triple(Screen.Today, Icons.Filled.Today, Icons.Outlined.Today),
-                    Triple(Screen.Upcoming, Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
-                    Triple(Screen.Browse, Icons.Filled.GridView, Icons.Outlined.GridView),
-                ).forEach { (s, on, off) ->
-                    val selected = root == s
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = { root = s; screen = s },
-                        icon = { Icon(if (selected) on else off, null) },
-                        label = { Text(s.title) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Brand, selectedTextColor = Brand, indicatorColor = Color.Transparent,
-                        ),
-                    )
-                }
-            }
-        },
-        floatingActionButton = {
-            if (screen != Screen.Browse && screen != Screen.Completed) {
-                FloatingActionButton(onClick = { adding = true }, containerColor = Brand, shape = RoundedCornerShape(16.dp)) {
-                    Icon(Icons.Filled.Add, "Add task", tint = Color.White)
-                }
-            }
-        },
-        snackbarHost = { SnackbarHost(snackbar) },
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) {
-            when (val s = screen) {
-                Screen.Browse -> BrowseScreen(tasks, projects) { screen = it }
-                else -> TaskListScreen(s, tasks, onToggle = ::toggle, onOpen = { editing = it.id })
-            }
-        }
-    }
-
-    if (adding) {
-        QuickAddSheet(
-            projects = projects,
-            defaultProject = (screen as? Screen.Project)?.name,
-            defaultToday = screen == Screen.Today,
-            previewJev = repo::previewJev,
-            previewLanguage = repo::previewLanguage,
-            onDismiss = { adding = false },
-        ) { text, desc, manual, fallbackToday ->
-            val t = repo.addFromText(text, desc, manual, fallbackToday)
+        if (!before.completed) {
+            view.confirm()
             scope.launch {
                 snackbar.currentSnackbarData?.dismiss()
-                snackbar.showSnackbar("Added “${t.title}”" + (t.due?.let { " · " + dueLabel(it, t.hasTime) } ?: ""))
+                val msg = if (after.completed) "Completed" else "Next: ${after.due?.let { dueLabel(it, after.hasTime) }}"
+                if (snackbar.showSnackbar(msg, "Undo", withDismissAction = false) == SnackbarResult.ActionPerformed) repo.upsert(before)
+            }
+        }
+    }
+
+    fun openComposer() {
+        composing = true
+        scope.launch { reveal.animateTo(1f, if (reduce) tween(120) else tween(440, easing = FastOutSlowInEasing)) }
+    }
+
+    fun closeComposer(then: () -> Unit = {}) {
+        scope.launch {
+            reveal.animateTo(0f, if (reduce) tween(100) else tween(320, easing = FastOutSlowInEasing))
+            composing = false
+            then()
+        }
+    }
+
+    androidx.activity.compose.BackHandler(enabled = composing) { closeComposer() }
+    androidx.activity.compose.BackHandler(enabled = !composing && tab == Kind.TASK && screen != root) { screen = root }
+
+    CompositionLocalProvider(LocalReducedMotion provides reduce) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            Scaffold(snackbarHost = { SnackbarHost(snackbar) }, containerColor = MaterialTheme.colorScheme.background) { pad ->
+                Column(Modifier.padding(pad).fillMaxSize()) {
+                    KindTabs(tab, onSelect = { view.tick(); tab = it }, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                    // Tabs slide in from the side you moved towards.
+                    AnimatedContent(
+                        targetState = tab,
+                        transitionSpec = {
+                            if (reduce) fadeIn(Motion.fade()) togetherWith fadeOut(Motion.fade())
+                            else {
+                                val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                                (slideInHorizontally(Motion.morph()) { it / 3 * dir } + fadeIn(Motion.fade())) togetherWith
+                                    (slideOutHorizontally(Motion.exit()) { -it / 5 * dir } + fadeOut(Motion.exit()))
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        label = "tab",
+                    ) { k ->
+                        when (k) {
+                            Kind.TASK -> TasksTab(
+                                screen = screen,
+                                root = root,
+                                tasks = tasks,
+                                projects = projects,
+                                onRoot = { root = it; screen = it },
+                                onScreen = { screen = it },
+                                onToggle = ::toggle,
+                                onOpen = { editing = it.id },
+                            )
+                            Kind.TIMER -> TimerTab(store)
+                            Kind.STOPWATCH -> StopwatchTab(store)
+                            Kind.FOCUS -> FocusTab(store)
+                            Kind.HABIT -> HabitsTab(repo) { editing = it.id }
+                            Kind.LIST -> ListsTab(store)
+                            Kind.COUNTDOWN -> CountdownTab(store)
+                            Kind.NOTE -> NotesTab(store)
+                        }
+                    }
+                }
+            }
+
+            val fabColor by animateColorAsState(tab.accent, Motion.settle(), label = "fab")
+            val fabScale by animateFloatAsState(if (composing) 0.6f else 1f, Motion.pop(), label = "fabScale")
+            FloatingActionButton(
+                onClick = { view.tick(); openComposer() },
+                containerColor = fabColor,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(20.dp)
+                    .graphicsLayer { scaleX = fabScale; scaleY = fabScale }
+                    .onGloballyPositioned { fabCenter = it.boundsInRoot().center },
+            ) { Icon(Icons.Filled.Add, "Create", tint = Color.White) }
+
+            // The creator grows out of the + button as a circle, and shrinks back into it.
+            if (composing) {
+                val progress = reveal.value
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            clip = true
+                            shape = CircleRevealShape(progress, fabCenter)
+                            alpha = (progress * 3f).coerceAtMost(1f)
+                        },
+                ) {
+                    Composer(
+                        startKind = tab,
+                        repo = repo,
+                        store = store,
+                        projects = projects,
+                        fallbackToday = tab == Kind.TASK && screen == Screen.Today,
+                        onClose = { closeComposer() },
+                        onCreated = { kind, label ->
+                            closeComposer {
+                                tab = kind
+                                scope.launch {
+                                    snackbar.currentSnackbarData?.dismiss()
+                                    snackbar.showSnackbar(label)
+                                }
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -202,6 +282,59 @@ fun EddiDoApp(repo: TaskRepository) {
                 }
             },
         )
+    }
+}
+
+/** A circle centred on [origin] whose radius grows with [progress] until it covers the screen. */
+private class CircleRevealShape(private val progress: Float, private val origin: Offset) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val o = if (origin == Offset.Zero) Offset(size.width, size.height) else origin
+        val far = listOf(Offset.Zero, Offset(size.width, 0f), Offset(0f, size.height), Offset(size.width, size.height))
+            .maxOf { (it - o).getDistance() }
+        val r = far * progress
+        return Outline.Generic(Path().apply { addOval(Rect(o, r)) })
+    }
+}
+
+/** The Tasks tab: Today / Upcoming / Inbox / Browse, switched with a small segmented row. */
+@Composable
+private fun TasksTab(
+    screen: Screen,
+    root: Screen,
+    tasks: List<Task>,
+    projects: List<String>,
+    onRoot: (Screen) -> Unit,
+    onScreen: (Screen) -> Unit,
+    onToggle: (Task) -> Unit,
+    onOpen: (Task) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        if (screen != root) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { onScreen(root) }) { Text("‹ Back") }
+                Text(screen.title, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            }
+        } else {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                listOf(Screen.Today, Screen.Upcoming, Screen.Inbox, Screen.Browse).forEach { s ->
+                    val on = s == root
+                    val bg by animateColorAsState(if (on) Kind.TASK.accent.copy(alpha = 0.16f) else Color.Transparent, Motion.settle(), label = "seg")
+                    val fg by animateColorAsState(if (on) Kind.TASK.accent else MaterialTheme.colorScheme.onSurfaceVariant, Motion.settle(), label = "segText")
+                    Box(
+                        Modifier.clip(RoundedCornerShape(50)).background(bg).clickable { onRoot(s) }.padding(horizontal = 14.dp, vertical = 7.dp),
+                    ) { Text(s.title, color = fg, fontSize = 14.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal) }
+                }
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            when (screen) {
+                Screen.Browse -> BrowseScreen(tasks, projects, onScreen)
+                else -> TaskListScreen(screen, tasks, onToggle = onToggle, onOpen = onOpen)
+            }
+        }
     }
 }
 
@@ -232,7 +365,7 @@ private fun TaskListScreen(screen: Screen, all: List<Task>, onToggle: (Task) -> 
             }
             Screen.Completed -> {
                 val done = all.filter { it.completed }.sortedByDescending { it.completedAt ?: 0 }
-                items(done, key = { it.id }) { TaskRow(it, true, { onToggle(it) }, { onOpen(it) }) }
+                items(done, key = { it.id }) { TaskRow(it, true, { onToggle(it) }, { onOpen(it) }, Modifier.animateItem()) }
                 if (done.isEmpty()) item { Empty("No completed tasks yet", "") }
             }
             else -> {
@@ -242,7 +375,7 @@ private fun TaskListScreen(screen: Screen, all: List<Task>, onToggle: (Task) -> 
                     is Screen.Label -> open.filter { screen.name in it.labels }
                     else -> open
                 }.sortedWith(taskOrder)
-                items(list, key = { it.id }) { TaskRow(it, screen !is Screen.Project && screen != Screen.Inbox, { onToggle(it) }, { onOpen(it) }) }
+                items(list, key = { it.id }) { TaskRow(it, screen !is Screen.Project && screen != Screen.Inbox, { onToggle(it) }, { onOpen(it) }, Modifier.animateItem()) }
                 if (list.isEmpty()) item {
                     if (screen == Screen.Inbox) Empty("Your inbox is clear", "New tasks land here until the AI sorts them into a project")
                     else Empty("No tasks here", "")
@@ -254,7 +387,7 @@ private fun TaskListScreen(screen: Screen, all: List<Task>, onToggle: (Task) -> 
 
 private fun LazyListScope.section(title: String, list: List<Task>, showProject: Boolean, onToggle: (Task) -> Unit, onOpen: (Task) -> Unit) {
     item(key = "h-$title") { SectionHeader(title, list.size) }
-    items(list, key = { it.id }) { TaskRow(it, showProject, { onToggle(it) }, { onOpen(it) }) }
+    items(list, key = { it.id }) { TaskRow(it, showProject, { onToggle(it) }, { onOpen(it) }, Modifier.animateItem()) }
 }
 
 @Composable
@@ -323,6 +456,8 @@ private fun BrowseRow(icon: ImageVector, label: String, count: Int, onClick: () 
 /** Nudges for the permissions alarms depend on; hidden once everything is granted. */
 @Composable
 private fun PermissionBanner() {
+    // Preview renders have no notification or alarm services to ask.
+    if (androidx.compose.ui.platform.LocalInspectionMode.current) return
     val ctx = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }

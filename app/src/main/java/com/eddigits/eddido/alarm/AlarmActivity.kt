@@ -48,10 +48,11 @@ class AlarmActivity : ComponentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val id = intent.getLongExtra(ReminderScheduler.EXTRA_TASK_ID, -1)
-        val task = TaskRepository.get(this).get(id)
-        val title = task?.title ?: "Alarm"
-        val subtitle = task?.project?.takeIf { it != "Inbox" }.orEmpty()
+        val isTimer = intent.getStringExtra(EXTRA_KIND) == KIND_TIMER
+        val id = if (isTimer) intent.getLongExtra(EXTRA_ID, -1) else intent.getLongExtra(ReminderScheduler.EXTRA_TASK_ID, -1)
+        val task = if (isTimer) null else TaskRepository.get(this).get(id)
+        val title = if (isTimer) intent.getStringExtra(EXTRA_TITLE) ?: "Time's up" else task?.title ?: "Alarm"
+        val subtitle = if (isTimer) "Timer finished" else task?.project?.takeIf { it != "Inbox" }.orEmpty()
 
         setContent {
             EddiDoTheme {
@@ -72,17 +73,32 @@ class AlarmActivity : ComponentActivity() {
                     Spacer(Modifier.height(64.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         OutlinedButton(
-                            onClick = { ActionReceiver.handle(this@AlarmActivity, id, ActionReceiver.ACTION_SNOOZE); finish() },
+                            onClick = {
+                                if (isTimer) TimerActionReceiver.handle(this@AlarmActivity, id, TimerActionReceiver.ACTION_ADD_MINUTE)
+                                else ActionReceiver.handle(this@AlarmActivity, id, ActionReceiver.ACTION_SNOOZE)
+                                finish()
+                            },
                             modifier = Modifier.weight(1f).height(64.dp),
-                        ) { Text("Snooze 10 min", fontSize = 16.sp) }
+                        ) { Text(if (isTimer) "+1 min" else "Snooze 10 min", fontSize = 16.sp) }
                         Button(
-                            onClick = { ActionReceiver.handle(this@AlarmActivity, id, ActionReceiver.ACTION_DONE); finish() },
+                            onClick = {
+                                if (isTimer) TimerActionReceiver.handle(this@AlarmActivity, id, TimerActionReceiver.ACTION_STOP)
+                                else ActionReceiver.handle(this@AlarmActivity, id, ActionReceiver.ACTION_DONE)
+                                finish()
+                            },
                             modifier = Modifier.weight(1f).height(64.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Brand),
-                        ) { Text("Dismiss", fontSize = 16.sp, color = Color.White) }
+                        ) { Text(if (isTimer) "Stop" else "Dismiss", fontSize = 16.sp, color = Color.White) }
                     }
                 }
             }
         }
+    }
+
+    companion object {
+        const val EXTRA_KIND = "alarm_kind"
+        const val EXTRA_ID = "alarm_id"
+        const val EXTRA_TITLE = "alarm_title"
+        const val KIND_TIMER = "timer"
     }
 }

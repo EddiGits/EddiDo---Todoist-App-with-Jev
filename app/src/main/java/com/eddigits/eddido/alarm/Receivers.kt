@@ -48,5 +48,6 @@ class ActionReceiver : BroadcastReceiver() {
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         TaskRepository.get(context).rescheduleAll()
+        com.eddigits.eddido.data.AppStore.get(context).rearm()
     }
 }

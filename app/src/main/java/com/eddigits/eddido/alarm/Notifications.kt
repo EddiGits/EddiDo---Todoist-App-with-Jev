@@ -18,6 +18,10 @@ import java.time.format.DateTimeFormatter
 object Notifications {
     private const val CH_REMINDERS = "reminders"
     private const val CH_ALARMS = "alarms_v1"
+    private const val CH_RUNNING = "running"
+    private const val FOCUS_ID = 7_000_001
+    private const val FOCUS_PHASE_ID = 7_000_002
+    private fun timerNotifId(id: Long) = 8_000_000 + (id % 1_000_000).toInt()
 
     fun createChannels(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -43,6 +47,96 @@ object Notifications {
                 )
             },
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_RUNNING, "Running timers", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Live countdown for running timers and focus sessions"
+                setShowBadge(false)
+            },
+        )
+    }
+
+    private fun openApp(context: Context, code: Int) = PendingIntent.getActivity(
+        context, code, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    /** A quiet ongoing notification whose clock counts down to [endsAt] by itself. */
+    private fun countdown(context: Context, id: Int, title: String, text: String, endsAt: Long?, paused: Boolean) {
+        val b = NotificationCompat.Builder(context, CH_RUNNING)
+            .setSmallIcon(R.drawable.ic_stat_task)
+            .setContentTitle(title)
+            .setContentText(if (paused) "Paused · $text" else text)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
+            .setContentIntent(openApp(context, id))
+        if (endsAt != null && !paused) b.setUsesChronometer(true).setChronometerCountDown(true).setWhen(endsAt).setShowWhen(true)
+        runCatching { context.getSystemService(NotificationManager::class.java).notify(id, b.build()) }
+    }
+
+    fun showTimerRunning(context: Context, t: com.eddigits.eddido.model.TimerItem) =
+        countdown(context, timerNotifId(t.id), t.label.ifBlank { "Timer" }, "Timer running", t.endsAt, paused = !t.running)
+
+    fun cancelTimer(context: Context, id: Long) =
+        context.getSystemService(NotificationManager::class.java).cancel(timerNotifId(id))
+
+    /** The timer ran out: ring like an alarm, full screen over the lock screen. */
+    fun showTimerDone(context: Context, t: com.eddigits.eddido.model.TimerItem) {
+        val code = timerNotifId(t.id)
+        fun act(action: String) = PendingIntent.getBroadcast(
+            context, code + action.hashCode(),
+            Intent(context, TimerActionReceiver::class.java).setAction(action).putExtra(TimerActionReceiver.EXTRA_ID, t.id),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val full = PendingIntent.getActivity(
+            context, code,
+            Intent(context, AlarmActivity::class.java)
+                .putExtra(AlarmActivity.EXTRA_KIND, AlarmActivity.KIND_TIMER)
+                .putExtra(AlarmActivity.EXTRA_ID, t.id)
+                .putExtra(AlarmActivity.EXTRA_TITLE, t.label.ifBlank { "Time's up" })
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CH_ALARMS)
+            .setSmallIcon(R.drawable.ic_stat_task)
+            .setContentTitle(t.label.ifBlank { "Time's up" })
+            .setContentText("Timer finished")
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setFullScreenIntent(full, true)
+            .setContentIntent(full)
+            .setOngoing(true)
+            .setTimeoutAfter(10 * 60_000L)
+            .addAction(0, "+1 min", act(TimerActionReceiver.ACTION_ADD_MINUTE))
+            .addAction(0, "Stop", act(TimerActionReceiver.ACTION_STOP))
+            .build()
+        n.flags = n.flags or Notification.FLAG_INSISTENT
+        runCatching { context.getSystemService(NotificationManager::class.java).notify(code, n) }
+    }
+
+    fun showFocusRunning(context: Context, s: com.eddigits.eddido.model.FocusSession) {
+        val phase = if (s.phase == com.eddigits.eddido.model.FocusPhase.FOCUS) "Focus" else "Break"
+        countdown(
+            context, FOCUS_ID, s.label.ifBlank { "Focus" }, "$phase · round ${s.round} of ${s.rounds}",
+            s.phaseEndsAt, paused = !s.running,
+        )
+    }
+
+    fun cancelFocus(context: Context) =
+        context.getSystemService(NotificationManager::class.java).cancel(FOCUS_ID)
+
+    /** A focus or break stretch ended: a normal (not insistent) alert. */
+    fun showFocusPhase(context: Context, title: String, text: String) {
+        val n = NotificationCompat.Builder(context, CH_REMINDERS)
+            .setSmallIcon(R.drawable.ic_stat_task)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openApp(context, FOCUS_PHASE_ID))
+            .build()
+        runCatching { context.getSystemService(NotificationManager::class.java).notify(FOCUS_PHASE_ID, n) }
     }
 
     fun show(context: Context, task: Task) {

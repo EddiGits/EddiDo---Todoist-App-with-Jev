@@ -65,6 +65,7 @@ class TaskRepository private constructor(
         description: String = "",
         manual: ManualChoices = ManualChoices(),
         fallbackToday: Boolean = false,
+        habitPerDay: Int? = null,
     ): Task {
         val pend = Pending(
             text = text.trim(),
@@ -73,6 +74,7 @@ class TaskRepository private constructor(
             fallbackToday = fallbackToday,
             jev = jevAi?.let { answered(JEV, text) },
             language = languageAi?.let { answered(LANGUAGE, text) },
+            habitPerDay = habitPerDay,
         )
         pend.jevDone = jevAi == null || pend.jev != null
         pend.languageDone = languageAi == null || pend.language != null
@@ -109,6 +111,8 @@ class TaskRepository private constructor(
         val fallbackToday: Boolean,
         var jev: AiResult?,
         var language: AiResult?,
+        /** Non-null: create this as a habit done this many times a day. */
+        val habitPerDay: Int?,
     ) {
         var jevDone = false
         var languageDone = false
@@ -131,7 +135,16 @@ class TaskRepository private constructor(
                 labels = r.labels,
                 reminder = r.reminder,
                 aiPending = !(jevDone && languageDone),
-            )
+            ).let { t ->
+                if (habitPerDay == null) t
+                else t.copy(
+                    habit = true,
+                    perDay = habitPerDay,
+                    // A habit repeats; daily unless the text says otherwise.
+                    recurrence = t.recurrence ?: com.eddigits.eddido.model.Recurrence(com.eddigits.eddido.model.RepeatUnit.DAY),
+                    due = t.due ?: java.time.LocalDate.now().atStartOfDay(),
+                )
+            }
         }
     }
 
@@ -219,8 +232,30 @@ class TaskRepository private constructor(
      * Completing a repeating task moves it to its next date, as Todoist does.
      * Returns the updated task.
      */
-    fun complete(id: Long, done: Boolean = true): Task? {
+    /**
+     * One check-in for a habit today ("drank a glass of water"). When today's target is
+     * met, the habit moves on to its next day, like completing a repeating task.
+     */
+    fun habitCheckIn(id: Long, delta: Int = 1): Task? {
         val t = get(id) ?: return null
+        val today = java.time.LocalDate.now()
+        val count = (t.doneOn(today) + delta).coerceIn(0, t.perDay)
+        var updated = t.copy(habitLog = t.habitLog + (today.toString() to count))
+        val due = updated.due
+        val rec = updated.recurrence
+        if (count >= t.perDay && due != null && rec != null && !due.toLocalDate().isAfter(today)) {
+            var next = rec.next(due)
+            while (!next.toLocalDate().isAfter(today)) next = rec.next(next)
+            updated = updated.copy(due = next)
+        }
+        upsert(updated)
+        return updated
+    }
+
+    fun complete(id: Long, done: Boolean = true): Task? {
+        val found = get(id) ?: return null
+        // Ticking a habit off in a list counts as meeting today's target.
+        val t = if (done && found.habit) found.copy(habitLog = found.habitLog + (java.time.LocalDate.now().toString() to found.perDay)) else found
         val rec = t.recurrence
         val updated = if (done && rec != null && t.due != null) {
             var next = rec.next(t.due)

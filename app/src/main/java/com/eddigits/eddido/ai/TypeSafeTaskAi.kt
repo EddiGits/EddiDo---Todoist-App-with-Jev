@@ -2,6 +2,7 @@ package com.eddigits.eddido.ai
 
 import android.util.Log
 import com.eddigits.eddido.BuildConfig
+import com.eddigits.eddido.model.Kind
 import com.eddigits.eddido.model.ReminderKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -77,6 +78,10 @@ class TypeSafeTaskAi(
                         .put("none", "A plain to-do with no reminder request and no time of day; a date or weekday alone does not count"),
                 ),
             )
+        // Which tab: 24/24 right on real phrases, including Tamil and Hindi.
+        val kinds = JSONObject()
+        Kind.entries.forEach { kinds.put(it.key, it.jevHint) }
+        q.put("kind", choice("What does the person want to create with this text", kinds))
         LABELS.forEach { (label, question) -> q.put("label_$label", JSONObject().put("type", "noul").put("instructions", question)) }
         return q
     }
@@ -105,6 +110,10 @@ class TypeSafeTaskAi(
                 else -> 4
             },
             reminder = reminder,
+            kind = a.optJSONObject("kind")?.let { Kind.fromKey(it.optString("choice")) },
+            kindProbabilities = a.optJSONObject("kind")?.optJSONObject("probabilities")?.let { p ->
+                p.keys().asSequence().mapNotNull { k -> Kind.fromKey(k)?.let { it to p.optDouble(k) } }.toMap()
+            } ?: emptyMap(),
         )
     }
 

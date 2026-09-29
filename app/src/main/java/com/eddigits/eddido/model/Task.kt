@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -86,7 +87,23 @@ data class Task(
     val aiPending: Boolean = false,
     /** What the user typed, kept so the AI can be re-run. */
     val sourceText: String = "",
+    /** Tracked as a habit: shows in the Habits tab with a streak. */
+    val habit: Boolean = false,
+    /** Times per day for a habit ("drink water 8 times a day"). */
+    val perDay: Int = 1,
+    /** Habit check-ins: ISO date → count done that day. */
+    val habitLog: Map<String, Int> = emptyMap(),
 ) {
+    fun doneOn(date: LocalDate): Int = habitLog[date.toString()] ?: 0
+
+    /** Days in a row, ending today (or yesterday if today isn't done yet), where the daily target was met. */
+    fun streak(today: LocalDate = LocalDate.now()): Int {
+        var d = if (doneOn(today) >= perDay) today else today.minusDays(1)
+        var n = 0
+        while (doneOn(d) >= perDay) { n++; d = d.minusDays(1) }
+        return n
+    }
+
     /** When the reminder should fire, or null if it should not. */
     fun fireAt(): LocalDateTime? = if (reminder != ReminderKind.NONE && hasTime && !completed) due else null
 
@@ -106,6 +123,9 @@ data class Task(
         .put("createdAt", createdAt)
         .put("aiPending", aiPending)
         .put("sourceText", sourceText)
+        .put("habit", habit)
+        .put("perDay", perDay)
+        .put("habitLog", JSONObject(habitLog))
 
     companion object {
         const val INBOX = "Inbox"
@@ -126,6 +146,9 @@ data class Task(
             createdAt = o.optLong("createdAt", System.currentTimeMillis()),
             aiPending = o.optBoolean("aiPending"),
             sourceText = o.optString("sourceText"),
+            habit = o.optBoolean("habit"),
+            perDay = o.optInt("perDay", 1).coerceAtLeast(1),
+            habitLog = o.optJSONObject("habitLog")?.let { h -> h.keys().asSequence().associateWith { h.optInt(it) } } ?: emptyMap(),
         )
     }
 }

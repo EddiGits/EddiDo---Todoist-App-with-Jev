@@ -17,6 +17,14 @@ The AI side is inspired by [Shapeshift](https://github.com/anishfn/shapeshift). 
 - `parse/QuickAddParser.kt` fills the chips instantly while the AI is thinking, and is the backup when there is no internet.
 - `alarm/` rings exact alarms (`setAlarmClock`, shown full screen over the lock screen) or posts notifications, with Done and Snooze buttons. It re-arms repeating tasks and restores alarms after a reboot.
 
+## Tabs and the creator
+
+Eight tabs, each with its own list you can edit: **Tasks** (Today / Upcoming / Inbox / Browse), **Timer**, **Stopwatch**, **Focus** (pomodoro), **Habits** (streaks), **Lists**, **Countdown** and **Notes**.
+
+Tap **+** and the creator grows out of the button in a circle. Type at the bottom. When you pause, Jev picks the tab: the highlight slides there and the preview above changes into what you're making, for example a timer ring filling to 10:00 or list items dropping in one by one. Tab switching works like Shapeshift's: below 40% confidence nothing changes; 40–70% the highlight is dashed; 70%+ it commits; and a different tab must win twice in a row (or be 85%+ sure) to take over. Tap an icon yourself and it stays until you change the text a lot. Nothing is created until you press the accept button.
+
+Animations use Shapeshift's spring values (`ui/motion/Motion.kt`), turned down to quick fades when the phone's "Remove animations" setting is on. Screens are checked with Paparazzi screenshots: `./gradlew recordPaparazziDebug` / `verifyPaparazziDebug`.
+
 ## Who decides what
 
 The AI decides everything it can. The app's own code only fills the chips instantly while the AI is thinking, and stands in when there is no internet.
@@ -29,6 +37,8 @@ The AI decides everything it can. The app's own code only fills the chips instan
 | Project | **Jev**; `#name` typed by you via the language model | Keyword rules |
 | Priority | **Jev**; `p1`–`p4` / "urgent" typed by you via the language model | Parser |
 | Labels | **Jev** (7 yes/no questions) + language model (`@label` and suggestions) | Parser (`@label`) |
+| Which tab (task, timer, habit…) | **Jev** (24/24 right in testing) | Keyword rules |
+| Timer length, list items, habit times per day, countdown date | Language model | Parser |
 | Ringing the alarm at the right moment | App (Android `AlarmManager`), since the AI can't do this | — |
 
 Chips you pick yourself always win. `data/TaskResolver.kt` holds these rules in one place. The live chips and the saved task both use it, so they always match. Safety checks: a date from the AI that is in the past is ignored, and a date you clearly typed is kept if the model misses it.

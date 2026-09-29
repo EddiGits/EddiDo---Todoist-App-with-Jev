@@ -99,138 +99,6 @@ data class TaskFields(
     val aiDerived: Set<String> = emptySet(),
 )
 
-/** Quick add: type naturally, the chips light up as dates, repeats and priorities are recognised. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun QuickAddSheet(
-    projects: List<String>,
-    defaultProject: String?,
-    defaultToday: Boolean,
-    previewJev: suspend (String) -> AiResult?,
-    previewLanguage: suspend (String) -> AiResult?,
-    onDismiss: () -> Unit,
-    onSubmit: (text: String, description: String, manual: ManualChoices, fallbackToday: Boolean) -> Unit,
-) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var text by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var manual by remember { mutableStateOf(ManualChoices(project = defaultProject)) }
-    val parsed = remember(text) { QuickAddParser.parse(text) }
-
-    // Live AI: once typing pauses, ask Jev (~0.4 s) and the language model (~2–5 s) in parallel.
-    // Answers are cached, so saving reuses them instead of asking again.
-    var jev by remember { mutableStateOf<Pair<String, AiResult>?>(null) }
-    var language by remember { mutableStateOf<Pair<String, AiResult>?>(null) }
-    var aiBusy by remember { mutableStateOf(false) }
-    LaunchedEffect(text) {
-        val t = text.trim()
-        if (t.length < 4) { aiBusy = false; return@LaunchedEffect }
-        delay(500)
-        aiBusy = true
-        coroutineScope {
-            launch { previewJev(t)?.let { jev = t to it } }
-            launch { previewLanguage(t)?.let { language = t to it } }
-        }
-        aiBusy = false
-    }
-    val current = text.trim()
-    // Same decision as the saved task (see TaskResolver), so what you see is what you get.
-    val resolved = TaskResolver.resolve(
-        text = current,
-        parsed = parsed,
-        manual = manual,
-        jev = jev?.takeIf { it.first == current }?.second,
-        language = language?.takeIf { it.first == current }?.second,
-        offlineProject = null,
-        fallbackToday = defaultToday,
-        now = LocalDateTime.now(),
-    )
-    val fields = TaskFields(
-        due = resolved.due,
-        hasTime = resolved.hasTime,
-        priority = resolved.priority,
-        reminder = resolved.reminder,
-        recurrence = resolved.recurrence,
-        project = resolved.project,
-        labels = resolved.labels,
-        aiDerived = resolved.aiDerived,
-    )
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-
-    fun submit() {
-        if (text.isBlank()) return
-        onSubmit(text.trim(), description.trim(), manual, defaultToday)
-        text = ""; description = ""
-        manual = ManualChoices(project = defaultProject)
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheet,
-        dragHandle = null,
-        containerColor = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(Modifier.imePadding().navigationBarsPadding()) {
-            PlainField(
-                value = text,
-                onValueChange = { text = it },
-                placeholder = "e.g. Wake me up every weekday 6am",
-                big = true,
-                modifier = Modifier.focusRequester(focus),
-                transformation = HighlightSpans(parsed.spans, MaterialTheme.colorScheme.primary),
-                imeAction = ImeAction.Send,
-                onIme = ::submit,
-            )
-            PlainField(description, { description = it }, "Description", big = false)
-            if (text.isBlank()) {
-                Text(
-                    "Try “pay rent on 5th p1”, “call mom tomorrow 7pm”, “10 min timer”, “naalai kalaila amma ku call”",
-                    Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(4.dp))
-                    val status = when {
-                        resolved.aiDerived.isNotEmpty() -> buildList {
-                            if ("title" in resolved.aiDerived && resolved.title != current) add("“${resolved.title}”")
-                            if ("project" in resolved.aiDerived) add(resolved.project)
-                            if ("labels" in resolved.aiDerived) resolved.labels.takeIf { it.isNotEmpty() }?.let { l -> add(l.joinToString(" ") { "@$it" }) }
-                        }.joinToString(" · ").ifEmpty { "AI agrees" } + if (aiBusy) " …" else ""
-                        aiBusy -> "Thinking…"
-                        else -> "AI reads the date, time, repeat and project as you type"
-                    }
-                    Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                }
-            }
-            AttributeChips(
-                fields = fields,
-                projects = projects,
-                onDue = { d, t -> manual = manual.copy(dueSet = true, due = d, hasTime = t) },
-                onPriority = { manual = manual.copy(priority = it) },
-                onReminder = { manual = manual.copy(reminder = it) },
-                onRepeat = { manual = manual.copy(recurrenceSet = true, recurrence = it) },
-                onLabels = { manual = manual.copy(labels = it) },
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                ProjectPicker(fields.project, projects, ai = "project" in fields.aiDerived) { manual = manual.copy(project = it) }
-                Spacer(Modifier.weight(1f))
-                FilledIconButton(
-                    onClick = ::submit,
-                    enabled = text.isNotBlank(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.padding(end = 8.dp).size(width = 52.dp, height = 40.dp),
-                ) { Icon(Icons.AutoMirrored.Filled.Send, "Add task", tint = Color.White) }
-            }
-        }
-    }
-}
-
 /** Edit an existing task with the same chips. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -244,6 +112,8 @@ fun EditTaskSheet(
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by remember { mutableStateOf(task.title) }
     var description by remember { mutableStateOf(task.description) }
+    var habit by remember { mutableStateOf(task.habit) }
+    var perDay by remember { mutableStateOf(task.perDay) }
     var f by remember {
         mutableStateOf(TaskFields(task.due, task.hasTime, task.priority, task.reminder, task.recurrence, task.project, task.labels))
     }
@@ -253,8 +123,11 @@ fun EditTaskSheet(
             title = title.trim().ifEmpty { task.title },
             description = description.trim(),
             due = f.due, hasTime = f.due != null && f.hasTime,
-            priority = f.priority, reminder = f.reminder, recurrence = f.recurrence,
+            priority = f.priority, reminder = f.reminder,
             project = f.project, labels = f.labels,
+            habit = habit, perDay = perDay,
+            // A habit needs to repeat; default to daily.
+            recurrence = if (habit) f.recurrence ?: com.eddigits.eddido.model.Recurrence(com.eddigits.eddido.model.RepeatUnit.DAY) else f.recurrence,
         )
         if (t.reminder != ReminderKind.NONE && t.due != null && !t.hasTime) t = t.copy(due = t.due!!.toLocalDate().atTime(9, 0), hasTime = true)
         onSave(t)
@@ -273,6 +146,17 @@ fun EditTaskSheet(
                 onRepeat = { f = f.copy(recurrence = it) },
                 onLabels = { f = f.copy(labels = it) },
             )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.AutoAwesome, null, tint = if (habit) com.eddigits.eddido.model.Kind.HABIT.accent else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Track as habit", Modifier.weight(1f))
+                if (habit) {
+                    TextButton(onClick = { perDay = (perDay - 1).coerceAtLeast(1) }) { Text("−") }
+                    Text("$perDay× a day")
+                    TextButton(onClick = { perDay = (perDay + 1).coerceAtMost(50) }) { Text("+") }
+                }
+                androidx.compose.material3.Switch(checked = habit, onCheckedChange = { habit = it })
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 ProjectPicker(f.project, projects) { f = f.copy(project = it) }
@@ -293,7 +177,7 @@ fun EditTaskSheet(
 }
 
 @Composable
-private fun AttributeChips(
+internal fun AttributeChips(
     fields: TaskFields,
     projects: List<String>,
     onDue: (LocalDateTime?, Boolean) -> Unit,
@@ -391,10 +275,16 @@ private fun AttributeChips(
 }
 
 @Composable
-private fun ProjectPicker(project: String, projects: List<String>, ai: Boolean = false, onPick: (String) -> Unit) {
+internal fun ProjectPicker(
+    project: String,
+    projects: List<String>,
+    ai: Boolean = false,
+    modifier: Modifier = Modifier,
+    onPick: (String) -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
-    Box {
+    Box(modifier) {
         TextButton(onClick = { open = true }) {
             Icon(if (project == Task.INBOX) Icons.Outlined.Inbox else Icons.Outlined.Tag, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(6.dp))
@@ -441,7 +331,7 @@ private fun Chip(icon: ImageVector, label: String?, tint: Color?, ai: Boolean = 
 }
 
 @Composable
-private fun PlainField(
+internal fun PlainField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
@@ -471,7 +361,7 @@ private fun PlainField(
 }
 
 /** Tints the words the parser understood, like Todoist's quick-add highlighting. */
-private class HighlightSpans(private val spans: List<Span>, private val color: Color) : VisualTransformation {
+internal class HighlightSpans(private val spans: List<Span>, private val color: Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val out = buildAnnotatedString {
             append(text.text)

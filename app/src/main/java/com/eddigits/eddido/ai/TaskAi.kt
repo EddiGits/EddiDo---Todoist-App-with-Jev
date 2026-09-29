@@ -1,6 +1,7 @@
 package com.eddigits.eddido.ai
 
 import com.eddigits.eddido.BuildConfig
+import com.eddigits.eddido.model.Kind
 import com.eddigits.eddido.model.Recurrence
 import com.eddigits.eddido.model.ReminderKind
 import java.time.LocalDateTime
@@ -32,6 +33,17 @@ data class AiResult(
     val explicitPriority: Boolean = false,
     /** null when this provider does not decide, or is not confident enough. */
     val reminder: ReminderKind? = null,
+    /** Which tab this text belongs to, with a probability per tab (Jev), or a single answer (language model). */
+    val kind: Kind? = null,
+    val kindProbabilities: Map<Kind, Double> = emptyMap(),
+    /** Timer length, or one focus stretch. */
+    val durationSeconds: Int? = null,
+    val breakMinutes: Int? = null,
+    /** List items, e.g. ["Milk", "Eggs"], and the list's name. */
+    val items: List<String> = emptyList(),
+    val listName: String? = null,
+    /** Habit: times per day. */
+    val perDay: Int? = null,
 )
 
 /**
